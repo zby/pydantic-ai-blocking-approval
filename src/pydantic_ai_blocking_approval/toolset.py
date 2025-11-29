@@ -21,16 +21,17 @@ class ApprovalToolset(AbstractToolset):
 
     Approval is determined by a layered approach:
 
-    1. **require_approval list**: Tools in this list are candidates for approval.
-       Tools NOT in the list skip approval entirely (unless decorated).
+    1. **pre_approved list**: Tools in this list skip approval.
+       Tools NOT in the list require approval by default (secure by default).
 
     2. **needs_approval() method**: If the toolset implements this, it decides
-       per-call whether approval is actually needed (returns bool).
+       per-call whether approval is needed. Returns:
+       - False: no approval needed
+       - True: approval needed with default presentation
+       - dict: approval needed with custom presentation (description, payload, etc.)
 
     3. **@requires_approval decorator**: Functions with this decorator always
        require approval, regardless of the list.
-
-    Presentation can be customized via the optional present_for_approval() method.
 
     Example:
         from pydantic_ai import Agent
@@ -40,18 +41,18 @@ class ApprovalToolset(AbstractToolset):
             print(f"Approve {request.tool_name}? {request.description}")
             return ApprovalDecision(approved=input("[y/n]: ").lower() == "y")
 
-        # Simple case: always prompt for these tools
+        # Simple case: pre-approve safe tools, all others require approval
         approved_toolset = ApprovalToolset(
             inner=my_toolset,
             prompt_fn=cli_prompt,
-            require_approval=["send_email", "delete_file"],
+            pre_approved=["get_time", "list_files"],
         )
 
         # Complex case: toolset decides per-call via needs_approval()
         approved_sandbox = ApprovalToolset(
             inner=file_sandbox,
             prompt_fn=cli_prompt,
-            require_approval=["write_file", "read_file"],
+            pre_approved=["read_file"],  # writes still require approval
         )
     """
 
@@ -60,7 +61,7 @@ class ApprovalToolset(AbstractToolset):
         inner: AbstractToolset,
         prompt_fn: Callable[[ApprovalRequest], ApprovalDecision],
         memory: Optional[ApprovalMemory] = None,
-        require_approval: Optional[list[str]] = None,
+        pre_approved: Optional[list[str]] = None,
     ):
         """Initialize the approval wrapper.
 
@@ -68,13 +69,13 @@ class ApprovalToolset(AbstractToolset):
             inner: The toolset to wrap (must implement AbstractToolset)
             prompt_fn: Callback to prompt user for approval (blocks until decision)
             memory: Session cache for "approve for session" (created if None)
-            require_approval: List of tool names that may require approval.
-                If None, only @requires_approval decorated functions are checked.
+            pre_approved: List of tool names that skip approval entirely.
+                Tools not in this list require approval by default (secure by default).
         """
         self._inner = inner
         self._prompt_fn = prompt_fn
         self._memory = memory or ApprovalMemory()
-        self._require_approval = set(require_approval) if require_approval else set()
+        self._pre_approved = set(pre_approved) if pre_approved else set()
 
     @property
     def id(self) -> Optional[str]:
@@ -100,9 +101,12 @@ class ApprovalToolset(AbstractToolset):
 
         Approval flow:
         1. Check @requires_approval decorator - always prompt if present
-        2. Check require_approval list - if tool not in list, skip approval
-        3. If toolset has needs_approval(), call it - if False, skip approval
-        4. Otherwise, prompt for approval
+        2. Check pre_approved list - if tool is in list, skip approval
+        3. If toolset has needs_approval(), call it:
+           - False: skip approval
+           - True: prompt with default presentation
+           - dict: prompt with custom presentation
+        4. Otherwise, prompt for approval (secure by default)
 
         Args:
             name: Tool name being called
@@ -122,25 +126,30 @@ class ApprovalToolset(AbstractToolset):
             self._prompt_for_approval(name, tool_args)
             return await self._inner.call_tool(name, tool_args, ctx, tool)
 
-        # Check if tool is in the require_approval list
-        if name not in self._require_approval:
-            # Not in list, no approval needed
+        # Check if tool is in the pre_approved list
+        if name in self._pre_approved:
+            # Pre-approved, no approval needed
             return await self._inner.call_tool(name, tool_args, ctx, tool)
 
-        # Tool is in require_approval list - check if toolset wants to decide
+        # Tool is not pre-approved - check if toolset wants to decide
+        presentation: dict[str, Any] = {}
         if hasattr(self._inner, "needs_approval"):
             try:
-                needs = self._inner.needs_approval(name, tool_args)
+                result = self._inner.needs_approval(name, tool_args)
             except PermissionError:
                 # Tool blocked entirely (e.g., path outside sandbox)
                 raise
 
-            if not needs:
+            if result is False:
                 # Toolset says no approval needed for this specific call
                 return await self._inner.call_tool(name, tool_args, ctx, tool)
 
+            if isinstance(result, dict):
+                # Toolset provided custom presentation
+                presentation = result
+
         # Approval is needed - prompt user
-        self._prompt_for_approval(name, tool_args)
+        self._prompt_for_approval(name, tool_args, presentation)
         return await self._inner.call_tool(name, tool_args, ctx, tool)
 
     def _get_function(self, name: str, tool: Any) -> Any:
@@ -153,19 +162,21 @@ class ApprovalToolset(AbstractToolset):
             func = getattr(tool, "function", tool)
         return func
 
-    def _prompt_for_approval(self, name: str, tool_args: dict[str, Any]) -> None:
+    def _prompt_for_approval(
+        self,
+        name: str,
+        tool_args: dict[str, Any],
+        presentation: Optional[dict[str, Any]] = None,
+    ) -> None:
         """Prompt user for approval, raising PermissionError if denied.
 
-        Uses present_for_approval() from toolset if available for custom presentation,
-        otherwise uses default presentation (tool name + args).
+        Args:
+            name: Tool name
+            tool_args: Tool arguments
+            presentation: Optional custom presentation dict with description,
+                payload, and/or presentation keys
         """
-        # Get presentation info
-        if hasattr(self._inner, "present_for_approval"):
-            try:
-                presentation = self._inner.present_for_approval(name, tool_args)
-            except Exception:
-                presentation = {}
-        else:
+        if presentation is None:
             presentation = {}
 
         description = presentation.get(

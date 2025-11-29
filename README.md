@@ -81,7 +81,7 @@ With **deferred approval**, the agent run terminates on rejection, requiring a n
 ```
 ApprovalToolset (wraps any toolset)
     ├── intercepts call_tool()
-    ├── checks require_approval list (which tools CAN need approval)
+    ├── checks pre_approved list (which tools skip approval)
     ├── calls needs_approval() if toolset implements it (per-call decision)
     ├── calls present_for_approval() if available (custom presentation)
     ├── consults ApprovalMemory for cached decisions
@@ -164,19 +164,19 @@ def send_email(to: str, subject: str, body: str) -> str:
     return f"Email sent to {to}"
 ```
 
-### Pattern 2: require_approval List
+### Pattern 2: pre_approved List
 
-Specify which tools need approval via the `require_approval` parameter:
+Specify which tools skip approval via the `pre_approved` parameter:
 
 ```python
 approved_toolset = ApprovalToolset(
     inner=my_toolset,
     prompt_fn=cli_prompt,
-    require_approval=["send_email", "delete_file", "execute_command"],
+    pre_approved=["get_time", "list_files", "get_weather"],
 )
 ```
 
-Tools in the list will always prompt for approval. Tools not in the list skip approval entirely.
+Tools in the list skip approval. Tools not in the list require approval by default (secure by default).
 
 ### Pattern 3: Custom Approval Logic
 
@@ -184,17 +184,25 @@ For complex tools (like file sandboxes or shell executors), implement `needs_app
 
 ```python
 class MyToolset:
-    def needs_approval(self, tool_name: str, args: dict) -> bool:
-        """Return True if this specific call needs approval."""
-        if tool_name == "shell_exec":
-            return self._is_dangerous_command(args["command"])
-        return False
+    def needs_approval(self, tool_name: str, args: dict) -> bool | dict:
+        """Decide if approval is needed and customize presentation.
 
-    def present_for_approval(self, tool_name: str, args: dict) -> dict:
-        """Optional: customize presentation for approval UI."""
+        Returns:
+            - False: no approval needed
+            - True: approval needed with default presentation
+            - dict: approval needed with custom presentation
+        """
+        if tool_name != "shell_exec":
+            return False
+
+        command = args["command"]
+        if self._is_safe_command(command):
+            return False
+
+        # Dangerous command - require approval with custom presentation
         return {
-            "description": f"Execute: {args['command'][:50]}...",
-            "payload": {"command": args["command"]},
+            "description": f"Execute: {command[:50]}...",
+            "payload": {"command": command},
         }
 ```
 
@@ -255,8 +263,7 @@ Supported presentation types:
 
 ### Protocols
 
-- `ApprovalConfigurable` - Protocol for toolsets with `needs_approval() -> bool`
-- `PresentableForApproval` - Protocol for custom presentation via `present_for_approval() -> dict`
+- `ApprovalConfigurable` - Protocol for toolsets with `needs_approval() -> bool | dict`
 
 ### Decorators
 

@@ -37,10 +37,12 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 
 ## Integration Patterns
 
-1. **Simple**: Add tool names to `require_approval` list — always prompts with default presentation
-2. **Custom logic**: Implement `needs_approval(tool_name, args) -> bool` on your toolset
-3. **Custom presentation**: Implement `present_for_approval(tool_name, args) -> dict`
-4. **Full control**: Use `ApprovalController` with modes for different environments
+1. **Simple**: Add safe tool names to `pre_approved` list — all others require approval (secure by default)
+2. **Custom logic**: Implement `needs_approval(tool_name, args) -> bool | dict` on your toolset
+   - Return `False` to skip approval
+   - Return `True` for default presentation
+   - Return `dict` with custom presentation (description, payload, etc.)
+3. **Full control**: Use `ApprovalController` with modes for different environments
 
 ---
 
@@ -58,7 +60,7 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 - The `payload` in presentation determines cache key granularity — design it carefully
 - `PermissionError` is raised on denial; callers should handle this gracefully
 - `prompt_fn` blocks execution — ensure it returns promptly in non-interactive modes
-- Tools NOT in `require_approval` list skip approval entirely (unless decorated)
+- Tools IN `pre_approved` list skip approval (secure by default: unlisted tools require approval)
 
 ---
 

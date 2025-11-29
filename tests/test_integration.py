@@ -165,8 +165,44 @@ class TestApprovalIntegration:
         # Should mention strict mode in the error
         assert "Strict mode" in str(exc_info.value)
 
-    def test_tool_without_decorator_no_approval_needed(self):
-        """Test that tools without @requires_approval execute without prompting."""
+    def test_tool_without_config_requires_approval(self):
+        """Test that tools without config require approval by default (secure by default)."""
+        approval_requests: list[ApprovalRequest] = []
+
+        def approve_callback(request: ApprovalRequest) -> ApprovalDecision:
+            approval_requests.append(request)
+            return ApprovalDecision(approved=True)
+
+        def some_action(message: str) -> str:
+            """An action that requires approval by default."""
+            return f"Processed: {message}"
+
+        inner_toolset = FunctionToolset([some_action])
+        approved_toolset = ApprovalToolset(
+            inner=inner_toolset,
+            prompt_fn=approve_callback,
+        )
+
+        agent = Agent(
+            model=TestModel(),
+            toolsets=[approved_toolset],
+        )
+
+        result = asyncio.run(
+            agent.run(
+                "Process the message 'hello'",
+                model=TestModel(call_tools=["some_action"]),
+            )
+        )
+
+        # Callback SHOULD have been called (secure by default)
+        assert len(approval_requests) == 1
+        assert approval_requests[0].tool_name == "some_action"
+        # Tool should have executed after approval
+        assert "Processed" in result.output or "hello" in result.output
+
+    def test_pre_approved_tool_skips_approval(self):
+        """Test that tools in pre_approved list execute without prompting."""
         callback_called = False
 
         def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
@@ -175,13 +211,14 @@ class TestApprovalIntegration:
             return ApprovalDecision(approved=True)
 
         def safe_action(message: str) -> str:
-            """A safe action that doesn't need approval."""
+            """A safe action that is pre-approved."""
             return f"Processed: {message}"
 
         inner_toolset = FunctionToolset([safe_action])
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
             prompt_fn=should_not_be_called,
+            pre_approved=["safe_action"],
         )
 
         agent = Agent(
@@ -196,7 +233,7 @@ class TestApprovalIntegration:
             )
         )
 
-        # Callback should NOT have been called
+        # Callback should NOT have been called (pre-approved)
         assert not callback_called
         # Tool should have executed
         assert "Processed" in result.output or "hello" in result.output
