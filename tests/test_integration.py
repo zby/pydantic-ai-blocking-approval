@@ -1,14 +1,18 @@
 """Integration tests with PydanticAI Agent and TestModel."""
 import asyncio
+import re
+from typing import Any
 
 import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai.toolsets.abstract import AbstractToolset
 
 from pydantic_ai_blocking_approval import (
     ApprovalController,
     ApprovalDecision,
+    ApprovalMemory,
     ApprovalRequest,
     ApprovalToolset,
     requires_approval,
@@ -237,3 +241,330 @@ class TestApprovalIntegration:
         assert not callback_called
         # Tool should have executed
         assert "Processed" in result.output or "hello" in result.output
+
+
+class ShellToolset(AbstractToolset):
+    """Example shell command toolset with patterned approval logic.
+
+    Demonstrates how to implement needs_approval() with:
+    - Safe commands that skip approval (ls, pwd, echo, cat for safe paths)
+    - Dangerous patterns that always require approval (rm, sudo, pipes, etc.)
+    - Custom presentation for dangerous commands
+    """
+
+    # Commands that are always safe (read-only, no side effects)
+    SAFE_COMMANDS = {"ls", "pwd", "whoami", "date", "echo", "cat", "head", "tail"}
+
+    # Patterns that are always dangerous
+    DANGEROUS_PATTERNS = [
+        r"\brm\b",  # rm command
+        r"\bsudo\b",  # sudo
+        r"\bmv\b",  # mv command
+        r"\bchmod\b",  # chmod
+        r"\bchown\b",  # chown
+        r"[|>&]",  # pipes and redirects
+        r"\$\(",  # command substitution
+        r"`",  # backticks
+        r";\s*\w",  # command chaining
+    ]
+
+    # Paths that are safe to read
+    SAFE_READ_PATHS = {"/tmp", "/var/log", "."}
+
+    def __init__(self) -> None:
+        self._executed_commands: list[str] = []
+
+    @property
+    def id(self) -> str | None:
+        return "shell_toolset"
+
+    async def get_tools(self, ctx: Any) -> dict:
+        """Return available tools."""
+        return {
+            "shell_exec": {
+                "description": "Execute a shell command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string", "description": "Command to execute"},
+                    },
+                    "required": ["command"],
+                },
+            }
+        }
+
+    async def call_tool(
+        self, name: str, tool_args: dict[str, Any], ctx: Any, tool: Any
+    ) -> str:
+        """Execute the tool (mock implementation)."""
+        if name == "shell_exec":
+            command = tool_args.get("command", "")
+            self._executed_commands.append(command)
+            return f"Executed: {command}"
+        raise ValueError(f"Unknown tool: {name}")
+
+    def needs_approval(self, tool_name: str, args: dict[str, Any]) -> bool | dict:
+        """Decide if shell command needs approval based on patterns.
+
+        Returns:
+            - False: safe command, no approval needed
+            - dict: dangerous command, approval needed with custom presentation
+        """
+        if tool_name != "shell_exec":
+            return True  # Unknown tools require approval
+
+        command = args.get("command", "")
+
+        # Check for dangerous patterns first (highest priority)
+        for pattern in self.DANGEROUS_PATTERNS:
+            if re.search(pattern, command):
+                return {
+                    "description": f"Execute potentially dangerous command: {command}",
+                    "payload": {"command": command, "pattern": pattern},
+                    "presentation": {
+                        "type": "command",
+                        "content": command,
+                        "metadata": {"warning": f"Matched dangerous pattern: {pattern}"},
+                    },
+                }
+
+        # Check if it's a safe command
+        base_command = command.split()[0] if command.split() else ""
+        if base_command in self.SAFE_COMMANDS:
+            # Additional check for cat/head/tail - verify path is safe
+            if base_command in {"cat", "head", "tail"} and len(command.split()) > 1:
+                path = command.split()[1]
+                if not any(path.startswith(safe) for safe in self.SAFE_READ_PATHS):
+                    return {
+                        "description": f"Read file outside safe paths: {path}",
+                        "payload": {"command": command, "path": path},
+                    }
+            return False  # Safe command, no approval needed
+
+        # Unknown command - require approval with default presentation
+        return {
+            "description": f"Execute command: {command}",
+            "payload": {"command": command},
+        }
+
+
+class TestShellToolsetApproval:
+    """Tests for shell command toolset with patterned approval logic.
+
+    These tests verify the needs_approval() pattern matching directly
+    and the ApprovalToolset integration via call_tool().
+    """
+
+    def test_needs_approval_safe_commands(self):
+        """Test that safe commands return False from needs_approval."""
+        toolset = ShellToolset()
+
+        # Safe commands should return False
+        assert toolset.needs_approval("shell_exec", {"command": "ls -la"}) is False
+        assert toolset.needs_approval("shell_exec", {"command": "pwd"}) is False
+        assert toolset.needs_approval("shell_exec", {"command": "whoami"}) is False
+        assert toolset.needs_approval("shell_exec", {"command": "date"}) is False
+        assert toolset.needs_approval("shell_exec", {"command": "echo hello"}) is False
+
+    def test_needs_approval_dangerous_patterns(self):
+        """Test that dangerous patterns return dict with custom presentation."""
+        toolset = ShellToolset()
+
+        # rm command
+        result = toolset.needs_approval("shell_exec", {"command": "rm -rf /tmp/files"})
+        assert isinstance(result, dict)
+        assert "dangerous" in result["description"].lower()
+        assert result["payload"]["command"] == "rm -rf /tmp/files"
+        assert "warning" in result["presentation"]["metadata"]
+
+        # sudo command
+        result = toolset.needs_approval("shell_exec", {"command": "sudo apt update"})
+        assert isinstance(result, dict)
+        assert "sudo" in result["presentation"]["metadata"]["warning"]
+
+        # pipe
+        result = toolset.needs_approval("shell_exec", {"command": "ls | grep foo"})
+        assert isinstance(result, dict)
+        assert "|" in result["presentation"]["metadata"]["warning"]
+
+        # redirect
+        result = toolset.needs_approval("shell_exec", {"command": "echo x > file"})
+        assert isinstance(result, dict)
+
+        # command substitution
+        result = toolset.needs_approval("shell_exec", {"command": "echo $(whoami)"})
+        assert isinstance(result, dict)
+
+    def test_needs_approval_cat_safe_paths(self):
+        """Test that cat on safe paths doesn't require approval."""
+        toolset = ShellToolset()
+
+        # Safe paths
+        assert toolset.needs_approval("shell_exec", {"command": "cat /tmp/test.log"}) is False
+        assert toolset.needs_approval("shell_exec", {"command": "cat /var/log/syslog"}) is False
+        assert toolset.needs_approval("shell_exec", {"command": "cat ./local.txt"}) is False
+
+    def test_needs_approval_cat_unsafe_paths(self):
+        """Test that cat on sensitive paths requires approval."""
+        toolset = ShellToolset()
+
+        # Unsafe paths
+        result = toolset.needs_approval("shell_exec", {"command": "cat /etc/passwd"})
+        assert isinstance(result, dict)
+        assert "/etc/passwd" in result["payload"]["path"]
+
+        result = toolset.needs_approval("shell_exec", {"command": "cat /home/user/.ssh/id_rsa"})
+        assert isinstance(result, dict)
+
+    def test_needs_approval_unknown_commands(self):
+        """Test that unknown commands require approval with basic presentation."""
+        toolset = ShellToolset()
+
+        result = toolset.needs_approval("shell_exec", {"command": "mycustomtool --flag"})
+        assert isinstance(result, dict)
+        assert "mycustomtool" in result["description"]
+        assert result["payload"]["command"] == "mycustomtool --flag"
+        # Unknown commands don't have the "warning" key in presentation
+        assert "presentation" not in result or result.get("presentation") is None
+
+    def test_approval_toolset_skips_safe_command(self):
+        """Test ApprovalToolset skips approval for safe commands."""
+        callback_called = False
+
+        def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
+            nonlocal callback_called
+            callback_called = True
+            return ApprovalDecision(approved=True)
+
+        shell_toolset = ShellToolset()
+        approved_toolset = ApprovalToolset(
+            inner=shell_toolset,
+            prompt_fn=should_not_be_called,
+        )
+
+        # Call tool directly (bypassing agent)
+        result = asyncio.run(
+            approved_toolset.call_tool(
+                "shell_exec",
+                {"command": "ls -la"},
+                ctx=None,
+                tool=None,
+            )
+        )
+
+        assert not callback_called
+        assert "ls -la" in shell_toolset._executed_commands
+        assert "Executed: ls -la" in result
+
+    def test_approval_toolset_prompts_for_dangerous_command(self):
+        """Test ApprovalToolset prompts for dangerous commands with custom presentation."""
+        approval_requests: list[ApprovalRequest] = []
+
+        def approve_callback(request: ApprovalRequest) -> ApprovalDecision:
+            approval_requests.append(request)
+            return ApprovalDecision(approved=True)
+
+        shell_toolset = ShellToolset()
+        approved_toolset = ApprovalToolset(
+            inner=shell_toolset,
+            prompt_fn=approve_callback,
+        )
+
+        result = asyncio.run(
+            approved_toolset.call_tool(
+                "shell_exec",
+                {"command": "rm -rf /tmp/old_files"},
+                ctx=None,
+                tool=None,
+            )
+        )
+
+        assert len(approval_requests) == 1
+        req = approval_requests[0]
+        assert req.tool_name == "shell_exec"
+        assert "dangerous" in req.description.lower()
+        assert req.payload["command"] == "rm -rf /tmp/old_files"
+        assert req.presentation is not None
+        assert req.presentation.metadata["warning"] is not None
+        assert "rm -rf /tmp/old_files" in shell_toolset._executed_commands
+
+    def test_approval_toolset_denies_command(self):
+        """Test ApprovalToolset raises PermissionError when denied."""
+        shell_toolset = ShellToolset()
+        approved_toolset = ApprovalToolset(
+            inner=shell_toolset,
+            prompt_fn=lambda req: ApprovalDecision(
+                approved=False, note="Too dangerous"
+            ),
+        )
+
+        with pytest.raises(PermissionError) as exc_info:
+            asyncio.run(
+                approved_toolset.call_tool(
+                    "shell_exec",
+                    {"command": "sudo rm -rf /"},
+                    ctx=None,
+                    tool=None,
+                )
+            )
+
+        assert "Too dangerous" in str(exc_info.value)
+        assert len(shell_toolset._executed_commands) == 0  # Never executed
+
+    def test_session_caching_for_commands(self):
+        """Test session approval caching works with command-based payloads."""
+        approval_count = 0
+        memory = ApprovalMemory()
+
+        def approve_for_session(request: ApprovalRequest) -> ApprovalDecision:
+            nonlocal approval_count
+            approval_count += 1
+            return ApprovalDecision(approved=True, remember="session")
+
+        shell_toolset = ShellToolset()
+        approved_toolset = ApprovalToolset(
+            inner=shell_toolset,
+            prompt_fn=approve_for_session,
+            memory=memory,
+        )
+
+        # First call - should prompt
+        asyncio.run(
+            approved_toolset.call_tool(
+                "shell_exec",
+                {"command": "rm /tmp/file1.txt"},
+                ctx=None,
+                tool=None,
+            )
+        )
+        assert approval_count == 1
+
+        # Second call with same command - should use cached approval
+        asyncio.run(
+            approved_toolset.call_tool(
+                "shell_exec",
+                {"command": "rm /tmp/file1.txt"},
+                ctx=None,
+                tool=None,
+            )
+        )
+        assert approval_count == 1  # Still 1, used cache
+
+        # Third call with different command - should prompt again
+        asyncio.run(
+            approved_toolset.call_tool(
+                "shell_exec",
+                {"command": "rm /tmp/file2.txt"},
+                ctx=None,
+                tool=None,
+            )
+        )
+        assert approval_count == 2  # Now 2, different command
+
+    def test_unknown_tool_requires_approval(self):
+        """Test that unknown tools (not shell_exec) require approval."""
+        toolset = ShellToolset()
+
+        # Unknown tool should return True (require approval)
+        result = toolset.needs_approval("unknown_tool", {"arg": "value"})
+        assert result is True
