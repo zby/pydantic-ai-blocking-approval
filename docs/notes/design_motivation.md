@@ -4,20 +4,22 @@
 
 ---
 
-## ⚠️ Stability Notice
+## ⚠️ Status Notice
 
-**Core features (stable):**
+This package is experimental. All APIs may change.
+
+**More mature:**
 - `ApprovalToolset` wrapper with `pre_approved` list
 - `ApprovalController` with modes (interactive/approve_all/strict)
 - `ApprovalMemory` for session caching
 - `ApprovalDecision` with `remember="session"`
 
-**Experimental features (likely to change):**
+**Highly experimental (likely to change significantly):**
 - `needs_approval() -> bool | dict` protocol for complex pattern-based approval
 - `ApprovalPresentation` structure for rich display hints
 - Custom `payload` design for cache granularity control
 
-The pattern-based approval examples (like `ShellToolset` in tests) demonstrate the *intended* design direction, but no production toolsets have been built yet. The `needs_approval()` API may evolve as we learn from real implementations.
+The pattern-based approval examples (like `ShellToolset` in tests) demonstrate the *intended* design direction, but no production toolsets have been built yet. The `needs_approval()` API will likely evolve significantly as we learn from real implementations.
 
 ---
 

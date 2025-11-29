@@ -2,6 +2,8 @@
 
 Synchronous, blocking approval system for PydanticAI agent tools.
 
+> **Status**: This package is experimental. The core wrapper (`ApprovalToolset`, `ApprovalController`) is more mature, while pattern-based approval via `needs_approval()` is highly experimental and likely to change. See [design motivation](docs/notes/design_motivation.md) for details.
+
 ## Why This Package?
 
 PydanticAI provides `DeferredToolRequests` for human-in-the-loop approval, but it's designed for **asynchronous, out-of-band** approval flows. This package provides an alternative for **synchronous, blocking** approval - a fundamentally different pattern.
@@ -83,7 +85,6 @@ ApprovalToolset (wraps any toolset)
     ├── intercepts call_tool()
     ├── checks pre_approved list (which tools skip approval)
     ├── calls needs_approval() if toolset implements it (per-call decision)
-    ├── calls present_for_approval() if available (custom presentation)
     ├── consults ApprovalMemory for cached decisions
     ├── calls prompt_fn and BLOCKS until user decides
     └── proceeds or raises PermissionError
@@ -93,6 +94,8 @@ ApprovalController (manages modes)
     ├── approve_all — auto-approve (testing)
     └── strict — auto-deny (safety)
 ```
+
+**Secure by default**: Tools not in the `pre_approved` list require approval. This ensures forgotten tools prompt rather than silently execute.
 
 ## Installation
 
@@ -178,7 +181,9 @@ approved_toolset = ApprovalToolset(
 
 Tools in the list skip approval. Tools not in the list require approval by default (secure by default).
 
-### Pattern 3: Custom Approval Logic
+### Pattern 3: Custom Approval Logic (Highly Experimental)
+
+> **Note**: This pattern is highly experimental and likely to change significantly as we build production toolsets.
 
 For complex tools (like file sandboxes or shell executors), implement `needs_approval()` to decide per-call:
 
@@ -206,6 +211,8 @@ class MyToolset:
         }
 ```
 
+See `tests/test_integration.py` for a complete `ShellToolset` example with pattern matching.
+
 ## Session Approval Caching
 
 When users approve with `remember="session"`, subsequent identical requests are auto-approved:
@@ -221,7 +228,9 @@ decision = ApprovalDecision(approved=True, remember="session")
 
 The cache key is `(tool_name, payload)`, so tools control matching granularity via their payload design.
 
-## Rich Presentation
+## Rich Presentation (Highly Experimental)
+
+> **Note**: This feature is highly experimental. The `ApprovalPresentation` structure will likely change.
 
 Tools can provide enhanced UI hints via `ApprovalPresentation`:
 
