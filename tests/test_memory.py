@@ -89,3 +89,42 @@ class TestApprovalMemory:
         result = memory.lookup("tool", {"b": 2, "a": 1})
         assert result is not None
         assert result.approved is True
+
+    def test_list_approvals_empty(self):
+        """List approvals on empty memory returns empty list."""
+        memory = ApprovalMemory()
+        assert memory.list_approvals() == []
+
+    def test_list_approvals(self):
+        """List approvals returns all cached decisions."""
+        memory = ApprovalMemory()
+        decision1 = ApprovalDecision(approved=True, remember="session")
+        decision2 = ApprovalDecision(approved=True, remember="session", note="ok")
+
+        memory.store("shell_exec", {"command": "rm /tmp/file1"}, decision1)
+        memory.store("shell_exec", {"command": "rm /tmp/file2"}, decision2)
+
+        approvals = memory.list_approvals()
+        assert len(approvals) == 2
+
+        # Check that both approvals are present (order not guaranteed)
+        tool_names = [t[0] for t in approvals]
+        payloads = [t[1] for t in approvals]
+        assert all(name == "shell_exec" for name in tool_names)
+        assert {"command": "rm /tmp/file1"} in payloads
+        assert {"command": "rm /tmp/file2"} in payloads
+
+    def test_len(self):
+        """Length returns number of cached approvals."""
+        memory = ApprovalMemory()
+        assert len(memory) == 0
+
+        decision = ApprovalDecision(approved=True, remember="session")
+        memory.store("tool1", {"key": "value1"}, decision)
+        assert len(memory) == 1
+
+        memory.store("tool2", {"key": "value2"}, decision)
+        assert len(memory) == 2
+
+        memory.clear()
+        assert len(memory) == 0

@@ -71,6 +71,22 @@ class ApprovalMemory:
         """Clear all session approvals."""
         self._cache.clear()
 
+    def list_approvals(self) -> list[tuple[str, dict, ApprovalDecision]]:
+        """List all cached session approvals.
+
+        Returns:
+            List of (tool_name, payload, decision) tuples for all cached approvals.
+        """
+        result = []
+        for (tool_name, payload_json), decision in self._cache.items():
+            payload = json.loads(payload_json)
+            result.append((tool_name, payload, decision))
+        return result
+
+    def __len__(self) -> int:
+        """Return the number of cached approvals."""
+        return len(self._cache)
+
     @staticmethod
     def _make_key(tool_name: str, args: dict) -> tuple[str, str]:
         """Create hashable key for session matching."""
