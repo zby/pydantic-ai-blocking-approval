@@ -2,6 +2,25 @@
 
 > This document explains the reasoning behind the `pydantic-ai-blocking-approval` architecture. If you're wondering "why not just a simple approve/deny function?", read on.
 
+---
+
+## ⚠️ Stability Notice
+
+**Core features (stable):**
+- `ApprovalToolset` wrapper with `pre_approved` list
+- `ApprovalController` with modes (interactive/approve_all/strict)
+- `ApprovalMemory` for session caching
+- `ApprovalDecision` with `remember="session"`
+
+**Experimental features (likely to change):**
+- `needs_approval() -> bool | dict` protocol for complex pattern-based approval
+- `ApprovalPresentation` structure for rich display hints
+- Custom `payload` design for cache granularity control
+
+The pattern-based approval examples (like `ShellToolset` in tests) demonstrate the *intended* design direction, but no production toolsets have been built yet. The `needs_approval()` API may evolve as we learn from real implementations.
+
+---
+
 ## The Problem Space
 
 At first glance, tool approval seems simple: before a tool runs, ask the user "yes or no?" But real-world use cases quickly reveal layers of complexity:
