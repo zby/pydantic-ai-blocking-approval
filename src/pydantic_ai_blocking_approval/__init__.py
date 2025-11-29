@@ -49,19 +49,20 @@ For testing, use approve_all or strict modes:
 from .controller import ApprovalController
 from .decorator import requires_approval
 from .memory import ApprovalMemory
-from .protocol import ApprovalAware
+from .protocol import ApprovalConfigurable, PresentableForApproval
 from .toolset import ApprovalToolset
 from .types import ApprovalDecision, ApprovalPresentation, ApprovalRequest
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "ApprovalAware",
+    "ApprovalConfigurable",
     "ApprovalController",
     "ApprovalDecision",
     "ApprovalMemory",
     "ApprovalPresentation",
     "ApprovalRequest",
     "ApprovalToolset",
+    "PresentableForApproval",
     "requires_approval",
 ]

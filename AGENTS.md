@@ -19,7 +19,9 @@ This package provides **synchronous, blocking** tool approval for PydanticAI age
 ```
 ApprovalToolset (wraps any toolset)
     ├── intercepts call_tool()
-    ├── checks if approval needed (decorator or ApprovalAware protocol)
+    ├── checks require_approval list (which tools CAN need approval)
+    ├── calls needs_approval() if toolset implements it (per-call decision)
+    ├── calls present_for_approval() if available (custom presentation)
     ├── consults ApprovalMemory for cached decisions
     ├── calls prompt_fn and BLOCKS until user decides
     └── proceeds or raises PermissionError
@@ -48,7 +50,7 @@ ApprovalController (manages modes)
 |--------|---------|
 | `types.py` | Core data types: `ApprovalRequest`, `ApprovalDecision`, `ApprovalPresentation` |
 | `memory.py` | Session cache for "approve for session" decisions |
-| `protocol.py` | `ApprovalAware` protocol for custom toolsets |
+| `protocol.py` | `ApprovalConfigurable` and `PresentableForApproval` protocols |
 | `toolset.py` | `ApprovalToolset` wrapper that intercepts tool calls |
 | `controller.py` | `ApprovalController` with mode-based behavior |
 | `decorator.py` | `@requires_approval` marker decorator |
@@ -57,9 +59,10 @@ ApprovalController (manages modes)
 
 ## Integration Patterns
 
-1. **Simple**: Use `@requires_approval` decorator on tool functions
-2. **Custom**: Implement `ApprovalAware.check_approval()` on your toolset
-3. **Full control**: Use `ApprovalController` with modes for different environments
+1. **Simple**: Add tool names to `require_approval` list — always prompts with default presentation
+2. **Custom logic**: Implement `needs_approval(tool_name, args) -> bool` on your toolset
+3. **Custom presentation**: Implement `present_for_approval(tool_name, args) -> dict`
+4. **Full control**: Use `ApprovalController` with modes for different environments
 
 ---
 
@@ -74,9 +77,10 @@ ApprovalController (manages modes)
 ## Common Pitfalls
 
 - Forgetting to pass `memory` to `ApprovalToolset` disables session caching
-- The `payload` in `ApprovalRequest` determines cache key granularity — design it carefully
+- The `payload` in presentation determines cache key granularity — design it carefully
 - `PermissionError` is raised on denial; callers should handle this gracefully
 - `prompt_fn` blocks execution — ensure it returns promptly in non-interactive modes
+- Tools NOT in `require_approval` list skip approval entirely (unless decorated)
 
 ---
 

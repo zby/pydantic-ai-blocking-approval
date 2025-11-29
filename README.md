@@ -146,24 +146,38 @@ def send_email(to: str, subject: str, body: str) -> str:
     return f"Email sent to {to}"
 ```
 
-### Pattern 2: ApprovalAware Toolset
+### Pattern 2: require_approval List
 
-Implement `check_approval()` on your toolset for custom logic:
+Specify which tools need approval via the `require_approval` parameter:
 
 ```python
-from pydantic_ai_blocking_approval import ApprovalAware, ApprovalRequest, ApprovalMemory
+approved_toolset = ApprovalToolset(
+    inner=my_toolset,
+    prompt_fn=cli_prompt,
+    require_approval=["send_email", "delete_file", "execute_command"],
+)
+```
 
+Tools in the list will always prompt for approval. Tools not in the list skip approval entirely.
+
+### Pattern 3: Custom Approval Logic
+
+For complex tools (like file sandboxes or shell executors), implement `needs_approval()` to decide per-call:
+
+```python
 class MyToolset:
-    def check_approval(
-        self, tool_name: str, args: dict, memory: ApprovalMemory
-    ) -> ApprovalRequest | None:
-        if tool_name == "dangerous_operation":
-            return ApprovalRequest(
-                tool_name=tool_name,
-                description=f"Execute {tool_name}",
-                payload=args,
-            )
-        return None  # No approval needed
+    def needs_approval(self, tool_name: str, args: dict) -> bool:
+        """Return True if this specific call needs approval."""
+        if tool_name == "shell_exec":
+            return self._is_dangerous_command(args["command"])
+        return False
+
+    def present_for_approval(self, tool_name: str, args: dict) -> dict:
+        """Optional: customize presentation for approval UI."""
+        return {
+            "description": f"Execute: {args['command'][:50]}...",
+            "payload": {"command": args["command"]},
+        }
 ```
 
 ## Session Approval Caching
@@ -223,7 +237,8 @@ Supported presentation types:
 
 ### Protocols
 
-- `ApprovalAware` - Protocol for toolsets with custom `check_approval()`
+- `ApprovalConfigurable` - Protocol for toolsets with `needs_approval() -> bool`
+- `PresentableForApproval` - Protocol for custom presentation via `present_for_approval() -> dict`
 
 ### Decorators
 

@@ -32,10 +32,10 @@ class ApprovalPresentation(BaseModel):
 
 
 class ApprovalRequest(BaseModel):
-    """Returned by check_approval() when approval is needed.
+    """Request for user approval before executing a tool.
 
-    This is the primary type returned by tools or toolsets when they need
-    user approval before proceeding with an operation.
+    Created by ApprovalToolset when a tool call needs approval.
+    Passed to the prompt_fn callback for user decision.
 
     Attributes:
         tool_name: Name of the tool requesting approval
