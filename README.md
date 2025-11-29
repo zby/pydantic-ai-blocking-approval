@@ -76,6 +76,24 @@ LLM: [remaining archive files auto-approved from session cache]
 
 With **deferred approval**, the agent run terminates on rejection, requiring a new conversation to retry. With **blocking approval**, the LLM learns from rejection feedback and adjusts within the same run.
 
+## Architecture Overview
+
+```
+ApprovalToolset (wraps any toolset)
+    ├── intercepts call_tool()
+    ├── checks require_approval list (which tools CAN need approval)
+    ├── calls needs_approval() if toolset implements it (per-call decision)
+    ├── calls present_for_approval() if available (custom presentation)
+    ├── consults ApprovalMemory for cached decisions
+    ├── calls prompt_fn and BLOCKS until user decides
+    └── proceeds or raises PermissionError
+
+ApprovalController (manages modes)
+    ├── interactive — prompts user via callback
+    ├── approve_all — auto-approve (testing)
+    └── strict — auto-deny (safety)
+```
+
 ## Installation
 
 ```bash

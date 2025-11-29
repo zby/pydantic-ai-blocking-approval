@@ -12,28 +12,6 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 
 ---
 
-## Architecture Overview
-
-This package provides **synchronous, blocking** tool approval for PydanticAI agents:
-
-```
-ApprovalToolset (wraps any toolset)
-    ├── intercepts call_tool()
-    ├── checks require_approval list (which tools CAN need approval)
-    ├── calls needs_approval() if toolset implements it (per-call decision)
-    ├── calls present_for_approval() if available (custom presentation)
-    ├── consults ApprovalMemory for cached decisions
-    ├── calls prompt_fn and BLOCKS until user decides
-    └── proceeds or raises PermissionError
-
-ApprovalController (manages modes)
-    ├── interactive — prompts user via callback
-    ├── approve_all — auto-approve (testing)
-    └── strict — auto-deny (safety)
-```
-
----
-
 ## Development
 
 - Run `uv run pytest` before committing (tests use mocks, no live API calls)

@@ -50,5 +50,4 @@ Repository = "https://github.com/zby/pydantic-ai-blocking-approval"
 packages = ["src/pydantic_ai_blocking_approval"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
