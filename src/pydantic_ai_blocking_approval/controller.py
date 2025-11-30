@@ -40,7 +40,7 @@ class ApprovalController:
         # Use with ApprovalToolset
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=controller.approval_callback,
+            approval_callback=controller.approval_callback,
             memory=controller.memory,
         )
     """

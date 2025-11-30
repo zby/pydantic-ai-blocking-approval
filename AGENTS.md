@@ -59,7 +59,7 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 - Forgetting to pass `memory` to `ApprovalToolset` disables session caching
 - The `payload` in presentation determines cache key granularity — design it carefully
 - `PermissionError` is raised on denial; callers should handle this gracefully
-- `prompt_fn` blocks execution — ensure it returns promptly in non-interactive modes
+- `approval_callback` blocks execution — ensure it returns promptly in non-interactive modes
 - Tools IN `pre_approved` list skip approval (secure by default: unlisted tools require approval)
 
 ---
