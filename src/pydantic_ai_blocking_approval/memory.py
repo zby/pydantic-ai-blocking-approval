@@ -15,11 +15,10 @@ class ApprovalMemory:
     """Session cache to avoid re-prompting for identical calls.
 
     When a user approves an operation with remember="session", subsequent
-    identical requests (same tool_name + payload) will be auto-approved
+    identical requests (same tool_name + tool_args) will be auto-approved
     without prompting.
 
-    The cache key is (tool_name, JSON-serialized payload), so tools control
-    matching granularity via their payload design.
+    The cache key is (tool_name, JSON-serialized tool_args).
 
     Example:
         memory = ApprovalMemory()
@@ -75,12 +74,12 @@ class ApprovalMemory:
         """List all cached session approvals.
 
         Returns:
-            List of (tool_name, payload, decision) tuples for all cached approvals.
+            List of (tool_name, tool_args, decision) tuples for all cached approvals.
         """
         result = []
-        for (tool_name, payload_json), decision in self._cache.items():
-            payload = json.loads(payload_json)
-            result.append((tool_name, payload, decision))
+        for (tool_name, args_json), decision in self._cache.items():
+            tool_args = json.loads(args_json)
+            result.append((tool_name, tool_args, decision))
         return result
 
     def __len__(self) -> int:

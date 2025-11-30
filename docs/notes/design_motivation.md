@@ -16,8 +16,7 @@ This package is experimental. All APIs may change.
 
 **Highly experimental (likely to change significantly):**
 - `needs_approval() -> bool | dict` protocol for complex pattern-based approval
-- `ApprovalPresentation` structure for rich display hints
-- Custom `payload` design for cache granularity control
+- Custom description in `needs_approval()` return
 
 The pattern-based approval examples (like `ShellToolset` in tests) demonstrate the *intended* design direction, but no production toolsets have been built yet. The `needs_approval()` API will likely evolve significantly as we learn from real implementations.
 
@@ -87,46 +86,20 @@ Without `pre_approved`, simple toolsets would need to implement `needs_approval(
 
 This follows the principle of least privilege.
 
-### 4. Why separate `payload` from `tool_args`?
+### 4. Why is presentation the CLI's responsibility?
 
-The `payload` in `ApprovalRequest` controls session cache matching:
+**Alternative**: The package could include a structured `ApprovalPresentation` type with `type`, `content`, `language` fields.
 
-```python
-# Tool args might include timestamps, request IDs, etc.
-tool_args = {"command": "rm /tmp/file.txt", "timestamp": 1234567890}
+**Problem**: This creates unnecessary coupling. The CLI already knows the tool name from `ApprovalRequest.tool_name` and can maintain its own mapping for how to render each tool's arguments.
 
-# But for caching, we only care about the command
-payload = {"command": "rm /tmp/file.txt"}
-```
+**Solution**: Keep `ApprovalRequest` simple with just `tool_name`, `tool_args`, and `description`. The CLI can:
+- Look up rendering logic by tool name
+- Parse the tool_args to extract display-relevant data
+- Render appropriately (diff for patches, syntax highlight for code, etc.)
 
-**Without separation**: Session approval for `rm /tmp/file.txt` at timestamp X wouldn't match the same command at timestamp Y.
+This follows separation of concerns: the package handles approval flow, the CLI handles presentation.
 
-**With separation**: Toolset controls cache granularity via `payload`. Same command = same cache key, regardless of metadata.
-
-### 5. Why `ApprovalPresentation` as a structured type?
-
-**Alternative**: Just pass the args as JSON to the prompt.
-
-**Problem**: A file write shows `{"path": "config.json", "content": "{\n  \"debug\": true\n}"}` — hard to read.
-
-**Solution**: Structured presentation hints:
-```python
-ApprovalPresentation(
-    type="diff",           # Render as a diff
-    content="- old\n+ new",
-    language="json",       # Syntax highlight as JSON
-    metadata={"path": "config.json"}
-)
-```
-
-The `approval_callback` can use these hints to render beautifully:
-- `type="diff"` → show colored diff
-- `type="command"` → show with `$` prefix and bash highlighting
-- `type="file_content"` → syntax highlight based on `language`
-
-The package provides the structure; the CLI provides the rendering.
-
-### 6. Why `ApprovalController` with modes?
+### 5. Why `ApprovalController` with modes?
 
 Different environments need different behaviors:
 
@@ -152,7 +125,7 @@ controller = ApprovalController(mode="interactive", approval_callback=cli_prompt
 
 The same toolset works in all environments by swapping the controller.
 
-### 7. Why session caching with `remember="session"`?
+### 6. Why session caching with `remember="session"`?
 
 **Scenario**: Agent deletes 100 old log files. Without caching:
 ```
@@ -167,7 +140,7 @@ Approve rm /tmp/log1.txt? [y/n/s] s  # 's' = session
 (remaining 99 auto-approved)
 ```
 
-The cache key is `(tool_name, payload)`, so:
+The cache key is `(tool_name, tool_args)`, so:
 - Same command → uses cache
 - Different command → prompts again
 
@@ -193,7 +166,25 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 | 10. Block dangerous commands | ✅ | `needs_approval()` raises `PermissionError` |
 | 11-13. Worker/delegation approval | ✅ | Generic — any tool type works |
 | 14. See approval history | ✅ | `ApprovalMemory.list_approvals()` |
-| 15-18. Rich presentation | ✅ | `ApprovalPresentation` with types |
+| 15-18. Rich presentation | ⚠️ | CLI responsibility (see note below) |
+
+**Note on Stories 15-18 (Rich Presentation):**
+
+These stories require the **CLI** to implement presentation logic. This library provides:
+- `tool_name` — to determine presentation type (e.g., "patch_file", "write_file", "shell")
+- `tool_args` — raw data to render (e.g., file path, content, command)
+- `description` — human-readable summary
+
+The CLI must implement:
+- **Diff rendering** (Story 15): Render `tool_args["diff"]` for `patch_file` operations
+- **Flexible file presentation** (Story 16): For `write_file`, decide based on context:
+  - Small files: show full content with syntax highlighting
+  - Large files: show summary (line count, size) with view option
+  - Overwrites: optionally compute diff against existing file
+- **Shell formatting** (Story 17): Format `tool_args["command"]` with `$` prefix
+- **Truncation/paging** (Story 18): Based on content length in `tool_args`
+
+This separation keeps the approval library simple and decoupled from UI concerns.
 
 ---
 
@@ -203,7 +194,7 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 ┌─────────────────────────────────────────────────────────────┐
 │                        CLI Layer                            │
 │  • TTY detection (Story 15)                                 │
-│  • Rich rendering of ApprovalPresentation                   │
+│  • Rich rendering based on tool_name + tool_args            │
 │  • Keyboard input handling                                  │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -230,7 +221,6 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 │                    Inner Toolset                            │
 │  • Implements actual tool logic                             │
 │  • Optionally implements needs_approval() -> bool | dict    │
-│  • Controls approval granularity via payload design         │
 └─────────────────────────────────────────────────────────────┘
 ```
 

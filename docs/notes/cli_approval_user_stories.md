@@ -192,23 +192,24 @@ sandbox:
 ## Phase 2: Rich Presentation Stories
 
 > These stories describe enhanced approval display features planned for Phase 2. Phase 1 displays tool name and args as JSON.
+>
+> **Note**: All presentation decisions are the CLI's responsibility. The approval library provides `tool_name` and `tool_args`; the CLI decides how to render them.
 
-## Story 15 — See file diffs before approving edits
-- **As** an operator approving file modifications,
+## Story 15 — See patch diffs before approving
+- **As** an operator approving file patches,
 - **I want** to see a unified diff of what will change,
 - **So that** I can catch unintended modifications before they happen.
 
 **Acceptance Criteria**
-1. When `write_file` is called on an existing file, the CLI displays a unified diff (like `git diff`).
+1. When `patch_file` is called, the CLI displays a unified diff (like `git diff`).
 2. Removed lines are shown in red with `-` prefix, added lines in green with `+` prefix.
 3. Context lines are shown around changes for orientation.
 4. The operator can approve, reject, or view the full file content.
-5. For new files (no existing content), the CLI shows the full content instead of a diff.
 
 **Example display:**
 ```
-┌─ write_file ──────────────────────────────────────────────┐
-│ Edit notes/report.md                                       │
+┌─ patch_file ──────────────────────────────────────────────┐
+│ Patch notes/report.md                                      │
 ├────────────────────────────────────────────────────────────┤
 │ @@ -1,3 +1,5 @@                                            │
 │  # Weekly Report                                           │
@@ -220,21 +221,25 @@ sandbox:
 └────────────────────────────────────────────────────────────┘
 ```
 
-## Story 16 — Preview new file content before creation
-- **As** an operator approving new file creation,
-- **I want** to see the content that will be written,
-- **So that** I can verify it's correct before the file is created.
+## Story 16 — Flexible file write presentation
+- **As** an operator approving file writes,
+- **I want** the CLI to present the operation appropriately based on context,
+- **So that** I can make informed decisions without being overwhelmed.
 
 **Acceptance Criteria**
-1. When `write_file` creates a new file, the CLI displays the content with syntax highlighting.
-2. The file extension determines the syntax highlighting language.
-3. Large files are truncated with a `[v] View full` option.
-4. The file size is shown in the header.
+1. The CLI decides how to present `write_file` based on the situation:
+   - **Small new file**: Show full content with syntax highlighting
+   - **Large new file**: Show summary (line count, size) with option to view
+   - **Overwrite existing**: Show diff, or summary if diff is too large
+2. The file extension determines syntax highlighting language.
+3. Large content is truncated with a `[v] View full` option.
 
-**Example display:**
+**Example displays:**
+
+Small new file:
 ```
 ┌─ write_file ──────────────────────────────────────────────┐
-│ Create config/settings.json (245 bytes)                    │
+│ Create config/settings.json (245 bytes, 5 lines)           │
 ├────────────────────────────────────────────────────────────┤
 │ {                                                          │
 │   "version": "1.0",                                        │
@@ -242,6 +247,20 @@ sandbox:
 │ }                                                          │
 ├────────────────────────────────────────────────────────────┤
 │ [y] Approve  [n] Reject  [s] Session                       │
+└────────────────────────────────────────────────────────────┘
+```
+
+Large new file:
+```
+┌─ write_file ──────────────────────────────────────────────┐
+│ Create data/export.csv (15,234 bytes, 847 lines)           │
+├────────────────────────────────────────────────────────────┤
+│ id,name,value                                              │
+│ 1,alpha,100                                                │
+│ 2,beta,200                                                 │
+│ ... [844 more lines]                                       │
+├────────────────────────────────────────────────────────────┤
+│ [y] Approve  [n] Reject  [s] Session  [v] View full        │
 └────────────────────────────────────────────────────────────┘
 ```
 

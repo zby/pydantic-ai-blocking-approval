@@ -50,7 +50,7 @@ A key advantage of blocking approval is the **immediate feedback loop**. When a 
 ```python
 def cli_prompt(request: ApprovalRequest) -> ApprovalDecision:
     print(f"Tool: {request.tool_name}")
-    print(f"Args: {request.payload}")
+    print(f"Args: {request.tool_args}")
     response = input("[y]es / [n]o: ")
     if response.lower() == "y":
         return ApprovalDecision(approved=True)
@@ -204,10 +204,9 @@ class MyToolset:
         if self._is_safe_command(command):
             return False
 
-        # Dangerous command - require approval with custom presentation
+        # Dangerous command - require approval with custom description
         return {
             "description": f"Execute: {command[:50]}...",
-            "payload": {"command": command},
         }
 ```
 
@@ -223,38 +222,10 @@ When users approve with `remember="session"`, subsequent identical requests are 
 decision = ApprovalDecision(approved=True, remember="session")
 
 # Subsequent identical calls - auto-approved from cache
-# (same tool_name + payload)
+# (same tool_name + tool_args)
 ```
 
-The cache key is `(tool_name, payload)`, so tools control matching granularity via their payload design.
-
-## Rich Presentation (Highly Experimental)
-
-> **Note**: This feature is highly experimental. The `ApprovalPresentation` structure will likely change.
-
-Tools can provide enhanced UI hints via `ApprovalPresentation`:
-
-```python
-from pydantic_ai_blocking_approval import ApprovalPresentation, ApprovalRequest
-
-request = ApprovalRequest(
-    tool_name="write_file",
-    description="Write to config.json",
-    payload={"path": "config.json"},
-    presentation=ApprovalPresentation(
-        type="diff",
-        content="- old value\n+ new value",
-        language="json",
-    ),
-)
-```
-
-Supported presentation types:
-- `text` - Plain text
-- `diff` - Side-by-side diff
-- `file_content` - Syntax-highlighted code
-- `command` - Shell command
-- `structured` - Tabular/tree data
+The cache key is `(tool_name, tool_args)`.
 
 ## API Reference
 
@@ -262,7 +233,6 @@ Supported presentation types:
 
 - `ApprovalRequest` - Request object when approval is needed
 - `ApprovalDecision` - User's decision (approved, note, remember)
-- `ApprovalPresentation` - Rich UI hints for display
 
 ### Classes
 

@@ -75,7 +75,7 @@ class ApprovalController:
         Returns:
             True if a matching approval is cached, False otherwise
         """
-        cached = self._memory.lookup(request.tool_name, request.payload)
+        cached = self._memory.lookup(request.tool_name, request.tool_args)
         return cached is not None and cached.approved
 
     def clear_session_approvals(self) -> None:
@@ -108,7 +108,7 @@ class ApprovalController:
             )
 
         # Check session cache
-        cached = self._memory.lookup(request.tool_name, request.payload)
+        cached = self._memory.lookup(request.tool_name, request.tool_args)
         if cached is not None:
             return cached
 
@@ -121,7 +121,7 @@ class ApprovalController:
 
         # Cache if remember="session"
         if decision.approved and decision.remember == "session":
-            self._memory.store(request.tool_name, request.payload, decision)
+            self._memory.store(request.tool_name, request.tool_args, decision)
 
         return decision
 

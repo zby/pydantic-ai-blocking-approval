@@ -27,8 +27,8 @@ class ApprovalToolset(AbstractToolset):
     2. **needs_approval() method**: If the toolset implements this, it decides
        per-call whether approval is needed. Returns:
        - False: no approval needed
-       - True: approval needed with default presentation
-       - dict: approval needed with custom presentation (description, payload, etc.)
+       - True: approval needed with default description
+       - dict: approval needed with custom description
 
     3. **@requires_approval decorator**: Functions with this decorator always
        require approval, regardless of the list.
@@ -104,8 +104,8 @@ class ApprovalToolset(AbstractToolset):
         2. Check pre_approved list - if tool is in list, skip approval
         3. If toolset has needs_approval(), call it:
            - False: skip approval
-           - True: prompt with default presentation
-           - dict: prompt with custom presentation
+           - True: prompt with default description
+           - dict: prompt with custom description
         4. Otherwise, prompt for approval (secure by default)
 
         Args:
@@ -132,7 +132,7 @@ class ApprovalToolset(AbstractToolset):
             return await self._inner.call_tool(name, tool_args, ctx, tool)
 
         # Tool is not pre-approved - check if toolset wants to decide
-        presentation: dict[str, Any] = {}
+        custom: dict[str, Any] = {}
         if hasattr(self._inner, "needs_approval"):
             try:
                 result = self._inner.needs_approval(name, tool_args)
@@ -145,11 +145,11 @@ class ApprovalToolset(AbstractToolset):
                 return await self._inner.call_tool(name, tool_args, ctx, tool)
 
             if isinstance(result, dict):
-                # Toolset provided custom presentation
-                presentation = result
+                # Toolset provided custom description
+                custom = result
 
         # Approval is needed - prompt user
-        self._prompt_for_approval(name, tool_args, presentation)
+        self._prompt_for_approval(name, tool_args, custom)
         return await self._inner.call_tool(name, tool_args, ctx, tool)
 
     def _get_function(self, name: str, tool: Any) -> Any:
@@ -166,42 +166,38 @@ class ApprovalToolset(AbstractToolset):
         self,
         name: str,
         tool_args: dict[str, Any],
-        presentation: Optional[dict[str, Any]] = None,
+        custom: Optional[dict[str, Any]] = None,
     ) -> None:
         """Prompt user for approval, raising PermissionError if denied.
 
         Args:
             name: Tool name
             tool_args: Tool arguments
-            presentation: Optional custom presentation dict with description,
-                payload, and/or presentation keys
+            custom: Optional dict with custom 'description' key
         """
-        if presentation is None:
-            presentation = {}
+        if custom is None:
+            custom = {}
 
-        description = presentation.get(
+        description = custom.get(
             "description",
             f"{name}({', '.join(f'{k}={v!r}' for k, v in tool_args.items())})",
         )
-        payload = presentation.get("payload", tool_args)
-        extra_presentation = presentation.get("presentation")
 
-        # Check session cache first
-        cached = self._memory.lookup(name, payload)
+        # Check session cache first (keyed by tool_name + tool_args)
+        cached = self._memory.lookup(name, tool_args)
         if cached is not None and cached.approved:
             return  # Already approved in session
 
         # Build request and prompt user
         request = ApprovalRequest(
             tool_name=name,
+            tool_args=tool_args,
             description=description,
-            payload=payload,
-            presentation=extra_presentation,
         )
         decision = self._approval_callback(request)
 
         # Cache the decision
-        self._memory.store(name, payload, decision)
+        self._memory.store(name, tool_args, decision)
 
         if not decision.approved:
             raise PermissionError(

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-11-30
+
+### Removed
+
+- **BREAKING**: Removed `ApprovalPresentation` type entirely
+  - Presentation is now the CLI's responsibility
+  - The CLI can use `tool_name` to look up rendering logic
+
+### Changed
+
+- **BREAKING**: Renamed `ApprovalRequest.payload` to `ApprovalRequest.tool_args`
+  - Simpler: just pass the tool arguments directly, no separate payload
+  - Session cache key is now `(tool_name, tool_args)`
+- Simplified `needs_approval()` return dict
+  - Only `description` key is used (for custom approval message)
+  - Removed `payload` key - tool_args are used for caching
+
 ## [0.2.0] - 2024-11-30
 
 ### Changed

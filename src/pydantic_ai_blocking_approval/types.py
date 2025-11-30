@@ -1,34 +1,14 @@
 """Core approval types.
 
 This module defines the fundamental data types for the blocking approval system:
-- ApprovalPresentation: Rich UI hints for approval display
 - ApprovalRequest: Returned by tools to request approval
 - ApprovalDecision: User's decision about a tool call
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional  # noqa: F401 - Literal used in ApprovalDecision
 
-from pydantic import BaseModel, Field
-
-
-class ApprovalPresentation(BaseModel):
-    """Rich presentation data for approval UI.
-
-    Optional - tools can provide this for enhanced display (diffs, syntax highlighting).
-    If not provided, the approval prompt renders from tool_name + args.
-
-    Attributes:
-        type: The presentation type determining how content should be rendered
-        content: The actual content to display
-        language: Optional language hint for syntax highlighting
-        metadata: Additional presentation metadata
-    """
-
-    type: Literal["text", "diff", "file_content", "command", "structured"]
-    content: str
-    language: Optional[str] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+from pydantic import BaseModel
 
 
 class ApprovalRequest(BaseModel):
@@ -39,15 +19,13 @@ class ApprovalRequest(BaseModel):
 
     Attributes:
         tool_name: Name of the tool requesting approval
+        tool_args: Arguments passed to the tool (used for display and session cache matching)
         description: Human-readable description of what the tool wants to do
-        payload: Data for session matching (determines if cached approval applies)
-        presentation: Optional rich UI hints for enhanced display
     """
 
     tool_name: str
+    tool_args: dict[str, Any]
     description: str
-    payload: dict[str, Any]
-    presentation: Optional[ApprovalPresentation] = None
 
 
 class ApprovalDecision(BaseModel):

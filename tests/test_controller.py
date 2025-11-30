@@ -16,8 +16,8 @@ class TestApprovalController:
         controller = ApprovalController(mode="approve_all")
         request = ApprovalRequest(
             tool_name="dangerous_tool",
+            tool_args={"action": "destroy"},
             description="Do something dangerous",
-            payload={"action": "destroy"},
         )
 
         decision = controller.request_approval_sync(request)
@@ -29,8 +29,8 @@ class TestApprovalController:
         controller = ApprovalController(mode="strict")
         request = ApprovalRequest(
             tool_name="any_tool",
+            tool_args={"key": "value"},
             description="Any operation",
-            payload={"key": "value"},
         )
 
         decision = controller.request_approval_sync(request)
@@ -49,8 +49,8 @@ class TestApprovalController:
         controller = ApprovalController(mode="interactive", approval_callback=callback)
         request = ApprovalRequest(
             tool_name="write_file",
+            tool_args={"path": "/tmp/test.txt"},
             description="Write to file",
-            payload={"path": "/tmp/test.txt"},
         )
 
         # First call - should invoke callback
@@ -75,19 +75,19 @@ class TestApprovalController:
 
         request1 = ApprovalRequest(
             tool_name="write_file",
+            tool_args={"path": "/tmp/file1.txt"},
             description="Write file 1",
-            payload={"path": "/tmp/file1.txt"},
         )
         request2 = ApprovalRequest(
             tool_name="write_file",
+            tool_args={"path": "/tmp/file2.txt"},
             description="Write file 2",
-            payload={"path": "/tmp/file2.txt"},
         )
 
         controller.request_approval_sync(request1)
         controller.request_approval_sync(request2)
 
-        # Both should trigger callback (different payloads)
+        # Both should trigger callback (different tool_args)
         assert len(approvals) == 2
 
     def test_session_approval_remember_none_not_cached(self):
@@ -101,8 +101,8 @@ class TestApprovalController:
         controller = ApprovalController(mode="interactive", approval_callback=callback)
         request = ApprovalRequest(
             tool_name="write_file",
+            tool_args={"path": "/tmp/test.txt"},
             description="Write to file",
-            payload={"path": "/tmp/test.txt"},
         )
 
         controller.request_approval_sync(request)
@@ -120,8 +120,8 @@ class TestApprovalController:
         controller = ApprovalController(mode="interactive", approval_callback=callback)
         request = ApprovalRequest(
             tool_name="tool",
+            tool_args={"key": "value"},
             description="Test",
-            payload={"key": "value"},
         )
 
         controller.request_approval_sync(request)
@@ -135,8 +135,8 @@ class TestApprovalController:
         controller = ApprovalController(mode="interactive")
         request = ApprovalRequest(
             tool_name="tool",
+            tool_args={"key": "value"},
             description="Test",
-            payload={"key": "value"},
         )
 
         with pytest.raises(NotImplementedError, match="No approval_callback"):
@@ -149,8 +149,8 @@ class TestApprovalController:
 
         request = ApprovalRequest(
             tool_name="tool",
+            tool_args={},
             description="Test",
-            payload={},
         )
         decision = callback(request)
 
@@ -163,8 +163,8 @@ class TestApprovalController:
 
         request = ApprovalRequest(
             tool_name="tool",
+            tool_args={},
             description="Test",
-            payload={},
         )
         decision = callback(request)
 
