@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pydantic-ai-blocking-approval"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Synchronous, blocking approval system for PydanticAI agent tools"
 readme = "README.md"
 license = "MIT"
@@ -48,6 +48,9 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/zby/pydantic-ai-blocking-approval"
 Repository = "https://github.com/zby/pydantic-ai-blocking-approval"
+
+[tool.hatch.version]
+path = "src/pydantic_ai_blocking_approval/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pydantic_ai_blocking_approval"]
