@@ -53,7 +53,7 @@ from .protocol import ApprovalConfigurable
 from .toolset import ApprovalToolset
 from .types import ApprovalDecision, ApprovalPresentation, ApprovalRequest
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "ApprovalConfigurable",
