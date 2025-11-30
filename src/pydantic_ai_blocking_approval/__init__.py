@@ -22,8 +22,8 @@ Example:
         ApprovalToolset,
     )
 
-    # Create a prompt function for interactive approval
-    def cli_prompt(request: ApprovalRequest) -> ApprovalDecision:
+    # Create a callback for interactive approval
+    def my_approval_callback(request: ApprovalRequest) -> ApprovalDecision:
         print(f"Approve {request.tool_name}? {request.description}")
         response = input("[y/n/s(ession)]: ")
         if response == "s":
@@ -31,10 +31,10 @@ Example:
         return ApprovalDecision(approved=response.lower() == "y")
 
     # Wrap your toolset with approval
-    controller = ApprovalController(mode="interactive", approval_callback=cli_prompt)
+    controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
     approved_toolset = ApprovalToolset(
         inner=my_toolset,
-        prompt_fn=controller.approval_callback,
+        approval_callback=controller.approval_callback,
         memory=controller.memory,
     )
 

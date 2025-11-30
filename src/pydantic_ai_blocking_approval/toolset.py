@@ -37,21 +37,21 @@ class ApprovalToolset(AbstractToolset):
         from pydantic_ai import Agent
         from pydantic_ai_blocking_approval import ApprovalToolset
 
-        def cli_prompt(request: ApprovalRequest) -> ApprovalDecision:
+        def my_approval_callback(request: ApprovalRequest) -> ApprovalDecision:
             print(f"Approve {request.tool_name}? {request.description}")
             return ApprovalDecision(approved=input("[y/n]: ").lower() == "y")
 
         # Simple case: pre-approve safe tools, all others require approval
         approved_toolset = ApprovalToolset(
             inner=my_toolset,
-            prompt_fn=cli_prompt,
+            approval_callback=my_approval_callback,
             pre_approved=["get_time", "list_files"],
         )
 
         # Complex case: toolset decides per-call via needs_approval()
         approved_sandbox = ApprovalToolset(
             inner=file_sandbox,
-            prompt_fn=cli_prompt,
+            approval_callback=my_approval_callback,
             pre_approved=["read_file"],  # writes still require approval
         )
     """
@@ -59,7 +59,7 @@ class ApprovalToolset(AbstractToolset):
     def __init__(
         self,
         inner: AbstractToolset,
-        prompt_fn: Callable[[ApprovalRequest], ApprovalDecision],
+        approval_callback: Callable[[ApprovalRequest], ApprovalDecision],
         memory: Optional[ApprovalMemory] = None,
         pre_approved: Optional[list[str]] = None,
     ):
@@ -67,13 +67,13 @@ class ApprovalToolset(AbstractToolset):
 
         Args:
             inner: The toolset to wrap (must implement AbstractToolset)
-            prompt_fn: Callback to prompt user for approval (blocks until decision)
+            approval_callback: Callback to request user approval (blocks until decision)
             memory: Session cache for "approve for session" (created if None)
             pre_approved: List of tool names that skip approval entirely.
                 Tools not in this list require approval by default (secure by default).
         """
         self._inner = inner
-        self._prompt_fn = prompt_fn
+        self._approval_callback = approval_callback
         self._memory = memory or ApprovalMemory()
         self._pre_approved = set(pre_approved) if pre_approved else set()
 
@@ -198,7 +198,7 @@ class ApprovalToolset(AbstractToolset):
             payload=payload,
             presentation=extra_presentation,
         )
-        decision = self._prompt_fn(request)
+        decision = self._approval_callback(request)
 
         # Cache the decision
         self._memory.store(name, payload, decision)

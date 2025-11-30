@@ -35,7 +35,7 @@ class ApprovalRequest(BaseModel):
     """Request for user approval before executing a tool.
 
     Created by ApprovalToolset when a tool call needs approval.
-    Passed to the prompt_fn callback for user decision.
+    Passed to the approval_callback for user decision.
 
     Attributes:
         tool_name: Name of the tool requesting approval

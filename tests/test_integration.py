@@ -41,7 +41,7 @@ class TestApprovalIntegration:
         # Wrap with approval
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
-            prompt_fn=deny_callback,
+            approval_callback=deny_callback,
         )
 
         agent = Agent(
@@ -82,7 +82,7 @@ class TestApprovalIntegration:
         inner_toolset = FunctionToolset([send_email])
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
-            prompt_fn=approve_callback,
+            approval_callback=approve_callback,
         )
 
         agent = Agent(
@@ -117,7 +117,7 @@ class TestApprovalIntegration:
         inner_toolset = FunctionToolset([dangerous_action])
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
-            prompt_fn=controller.approval_callback,
+            approval_callback=controller.approval_callback,
             memory=controller.memory,
         )
 
@@ -148,7 +148,7 @@ class TestApprovalIntegration:
         inner_toolset = FunctionToolset([write_file])
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
-            prompt_fn=controller.approval_callback,
+            approval_callback=controller.approval_callback,
             memory=controller.memory,
         )
 
@@ -184,7 +184,7 @@ class TestApprovalIntegration:
         inner_toolset = FunctionToolset([some_action])
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
-            prompt_fn=approve_callback,
+            approval_callback=approve_callback,
         )
 
         agent = Agent(
@@ -221,7 +221,7 @@ class TestApprovalIntegration:
         inner_toolset = FunctionToolset([safe_action])
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
-            prompt_fn=should_not_be_called,
+            approval_callback=should_not_be_called,
             pre_approved=["safe_action"],
         )
 
@@ -439,7 +439,7 @@ class TestShellToolsetApproval:
         shell_toolset = ShellToolset()
         approved_toolset = ApprovalToolset(
             inner=shell_toolset,
-            prompt_fn=should_not_be_called,
+            approval_callback=should_not_be_called,
         )
 
         # Call tool directly (bypassing agent)
@@ -467,7 +467,7 @@ class TestShellToolsetApproval:
         shell_toolset = ShellToolset()
         approved_toolset = ApprovalToolset(
             inner=shell_toolset,
-            prompt_fn=approve_callback,
+            approval_callback=approve_callback,
         )
 
         result = asyncio.run(
@@ -493,7 +493,7 @@ class TestShellToolsetApproval:
         shell_toolset = ShellToolset()
         approved_toolset = ApprovalToolset(
             inner=shell_toolset,
-            prompt_fn=lambda req: ApprovalDecision(
+            approval_callback=lambda req: ApprovalDecision(
                 approved=False, note="Too dangerous"
             ),
         )
@@ -524,7 +524,7 @@ class TestShellToolsetApproval:
         shell_toolset = ShellToolset()
         approved_toolset = ApprovalToolset(
             inner=shell_toolset,
-            prompt_fn=approve_for_session,
+            approval_callback=approve_for_session,
             memory=memory,
         )
 

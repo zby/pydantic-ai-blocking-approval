@@ -119,7 +119,7 @@ ApprovalPresentation(
 )
 ```
 
-The `prompt_fn` can use these hints to render beautifully:
+The `approval_callback` can use these hints to render beautifully:
 - `type="diff"` → show colored diff
 - `type="command"` → show with `$` prefix and bash highlighting
 - `type="file_content"` → syntax highlight based on `language`
@@ -181,7 +181,7 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 
 | Story | Status | Implementation |
 |-------|--------|----------------|
-| 1. Pause on guarded tool | ✅ | `prompt_fn` blocks until decision |
+| 1. Pause on guarded tool | ✅ | `approval_callback` blocks until decision |
 | 2. Approve and resume | ✅ | Approval unblocks, execution continues |
 | 3. Reject with feedback | ✅ | `ApprovalDecision(approved=False, note="...")` |
 | 4. Pre-approve in config | ✅ | `pre_approved` list + `needs_approval()` |
@@ -211,7 +211,7 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 ┌─────────────────────────────────────────────────────────────┐
 │                   ApprovalController                        │
 │  • Mode selection (interactive/approve_all/strict)          │
-│  • Provides prompt_fn based on mode                         │
+│  • Provides approval_callback based on mode                 │
 │  • Owns ApprovalMemory for session caching                  │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -222,7 +222,7 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 │  • Checks pre_approved list                                 │
 │  • Calls needs_approval() on inner toolset                  │
 │  • Builds ApprovalRequest with presentation                 │
-│  • Consults cache, calls prompt_fn, handles decision        │
+│  • Consults cache, calls approval_callback, handles decision│
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -255,4 +255,4 @@ Each layer has a single responsibility:
 - No session caching needed
 - Single environment (no mode switching)
 
-The architecture is designed to be adoptable incrementally — start with `ApprovalToolset` + simple `prompt_fn`, add `ApprovalController` when you need modes, add `needs_approval()` when you need per-call decisions.
+The architecture is designed to be adoptable incrementally — start with `ApprovalToolset` + simple `approval_callback`, add `ApprovalController` when you need modes, add `needs_approval()` when you need per-call decisions.
