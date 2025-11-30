@@ -3,42 +3,42 @@ import pytest
 
 from pydantic_ai_blocking_approval import (
     ApprovalDecision,
-    ApprovalPresentation,
     ApprovalRequest,
+    OperationDescriptor,
 )
 
 
-class TestApprovalPresentation:
-    """Tests for ApprovalPresentation."""
+class TestOperationDescriptor:
+    """Tests for OperationDescriptor."""
 
-    def test_basic_presentation(self):
-        """Create a basic text presentation."""
-        presentation = ApprovalPresentation(
+    def test_basic_descriptor(self):
+        """Create a basic text operation descriptor."""
+        descriptor = OperationDescriptor(
             type="text",
             content="Simple message",
         )
-        assert presentation.type == "text"
-        assert presentation.content == "Simple message"
-        assert presentation.language is None
-        assert presentation.metadata == {}
+        assert descriptor.type == "text"
+        assert descriptor.content == "Simple message"
+        assert descriptor.language is None
+        assert descriptor.metadata == {}
 
-    def test_presentation_with_language(self):
-        """Create a presentation with syntax highlighting hint."""
-        presentation = ApprovalPresentation(
+    def test_descriptor_with_language(self):
+        """Create a descriptor with syntax highlighting hint."""
+        descriptor = OperationDescriptor(
             type="file_content",
             content="def hello(): pass",
             language="python",
         )
-        assert presentation.language == "python"
+        assert descriptor.language == "python"
 
-    def test_presentation_with_metadata(self):
-        """Create a presentation with metadata."""
-        presentation = ApprovalPresentation(
+    def test_descriptor_with_metadata(self):
+        """Create a descriptor with metadata."""
+        descriptor = OperationDescriptor(
             type="diff",
             content="- old\n+ new",
             metadata={"file": "test.py", "lines": 10},
         )
-        assert presentation.metadata["file"] == "test.py"
+        assert descriptor.metadata["file"] == "test.py"
 
 
 class TestApprovalRequest:
@@ -54,19 +54,19 @@ class TestApprovalRequest:
         assert request.tool_name == "write_file"
         assert request.description == "Write to /tmp/test.txt"
         assert request.payload == {"path": "/tmp/test.txt"}
-        assert request.presentation is None
+        assert request.operation is None
 
-    def test_request_with_presentation(self):
-        """Create a request with rich presentation."""
-        presentation = ApprovalPresentation(type="text", content="Details")
+    def test_request_with_operation(self):
+        """Create a request with operation descriptor."""
+        operation = OperationDescriptor(type="text", content="Details")
         request = ApprovalRequest(
             tool_name="shell",
             description="Run command",
             payload={"command": "ls"},
-            presentation=presentation,
+            operation=operation,
         )
-        assert request.presentation is not None
-        assert request.presentation.type == "text"
+        assert request.operation is not None
+        assert request.operation.type == "text"
 
 
 class TestApprovalDecision:

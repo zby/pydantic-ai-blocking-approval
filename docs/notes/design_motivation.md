@@ -16,7 +16,7 @@ This package is experimental. All APIs may change.
 
 **Highly experimental (likely to change significantly):**
 - `needs_approval() -> bool | dict` protocol for complex pattern-based approval
-- `ApprovalPresentation` structure for rich display hints
+- `OperationDescriptor` structure for describing operations
 - Custom `payload` design for cache granularity control
 
 The pattern-based approval examples (like `ShellToolset` in tests) demonstrate the *intended* design direction, but no production toolsets have been built yet. The `needs_approval()` API will likely evolve significantly as we learn from real implementations.
@@ -103,18 +103,18 @@ payload = {"command": "rm /tmp/file.txt"}
 
 **With separation**: Toolset controls cache granularity via `payload`. Same command = same cache key, regardless of metadata.
 
-### 5. Why `ApprovalPresentation` as a structured type?
+### 5. Why `OperationDescriptor` as a structured type?
 
 **Alternative**: Just pass the args as JSON to the prompt.
 
 **Problem**: A file write shows `{"path": "config.json", "content": "{\n  \"debug\": true\n}"}` — hard to read.
 
-**Solution**: Structured presentation hints:
+**Solution**: Structured operation descriptors:
 ```python
-ApprovalPresentation(
-    type="diff",           # Render as a diff
+OperationDescriptor(
+    type="diff",           # Type of operation/content
     content="- old\n+ new",
-    language="json",       # Syntax highlight as JSON
+    language="json",       # Language hint for syntax highlighting
     metadata={"path": "config.json"}
 )
 ```
@@ -124,7 +124,7 @@ The `prompt_fn` can use these hints to render beautifully:
 - `type="command"` → show with `$` prefix and bash highlighting
 - `type="file_content"` → syntax highlight based on `language`
 
-The package provides the structure; the CLI provides the rendering.
+The tool describes the operation; the CLI decides how to present it.
 
 ### 6. Why `ApprovalController` with modes?
 
@@ -193,7 +193,7 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 | 10. Block dangerous commands | ✅ | `needs_approval()` raises `PermissionError` |
 | 11-13. Worker/delegation approval | ✅ | Generic — any tool type works |
 | 14. See approval history | ✅ | `ApprovalMemory.list_approvals()` |
-| 15-18. Rich presentation | ✅ | `ApprovalPresentation` with types |
+| 15-18. Rich presentation | ✅ | `OperationDescriptor` with types |
 
 ---
 
@@ -203,7 +203,7 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 ┌─────────────────────────────────────────────────────────────┐
 │                        CLI Layer                            │
 │  • TTY detection (Story 15)                                 │
-│  • Rich rendering of ApprovalPresentation                   │
+│  • Rich rendering based on OperationDescriptor              │
 │  • Keyboard input handling                                  │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -221,7 +221,7 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 │  • Wraps any AbstractToolset                                │
 │  • Checks pre_approved list                                 │
 │  • Calls needs_approval() on inner toolset                  │
-│  • Builds ApprovalRequest with presentation                 │
+│  • Builds ApprovalRequest with operation descriptor         │
 │  • Consults cache, calls prompt_fn, handles decision        │
 └─────────────────────────────────────────────────────────────┘
                               │

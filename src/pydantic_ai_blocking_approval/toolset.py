@@ -27,8 +27,8 @@ class ApprovalToolset(AbstractToolset):
     2. **needs_approval() method**: If the toolset implements this, it decides
        per-call whether approval is needed. Returns:
        - False: no approval needed
-       - True: approval needed with default presentation
-       - dict: approval needed with custom presentation (description, payload, etc.)
+       - True: approval needed with default display
+       - dict: approval needed with custom context (description, payload, operation)
 
     3. **@requires_approval decorator**: Functions with this decorator always
        require approval, regardless of the list.
@@ -104,8 +104,8 @@ class ApprovalToolset(AbstractToolset):
         2. Check pre_approved list - if tool is in list, skip approval
         3. If toolset has needs_approval(), call it:
            - False: skip approval
-           - True: prompt with default presentation
-           - dict: prompt with custom presentation
+           - True: prompt with default display
+           - dict: prompt with custom context (description, payload, operation)
         4. Otherwise, prompt for approval (secure by default)
 
         Args:
@@ -173,8 +173,8 @@ class ApprovalToolset(AbstractToolset):
         Args:
             name: Tool name
             tool_args: Tool arguments
-            presentation: Optional custom presentation dict with description,
-                payload, and/or presentation keys
+            presentation: Optional custom dict with description,
+                payload, and/or operation keys
         """
         if presentation is None:
             presentation = {}
@@ -184,7 +184,7 @@ class ApprovalToolset(AbstractToolset):
             f"{name}({', '.join(f'{k}={v!r}' for k, v in tool_args.items())})",
         )
         payload = presentation.get("payload", tool_args)
-        extra_presentation = presentation.get("presentation")
+        operation = presentation.get("operation")
 
         # Check session cache first
         cached = self._memory.lookup(name, payload)
@@ -196,7 +196,7 @@ class ApprovalToolset(AbstractToolset):
             tool_name=name,
             description=description,
             payload=payload,
-            presentation=extra_presentation,
+            operation=operation,
         )
         decision = self._prompt_fn(request)
 

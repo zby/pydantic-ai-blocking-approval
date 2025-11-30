@@ -26,7 +26,7 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 
 | Module | Purpose |
 |--------|---------|
-| `types.py` | Core data types: `ApprovalRequest`, `ApprovalDecision`, `ApprovalPresentation` |
+| `types.py` | Core data types: `ApprovalRequest`, `ApprovalDecision`, `OperationDescriptor` |
 | `memory.py` | Session cache for "approve for session" decisions |
 | `protocol.py` | `ApprovalConfigurable` and `PresentableForApproval` protocols |
 | `toolset.py` | `ApprovalToolset` wrapper that intercepts tool calls |
@@ -40,8 +40,8 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 1. **Simple**: Add safe tool names to `pre_approved` list — all others require approval (secure by default)
 2. **Custom logic**: Implement `needs_approval(tool_name, args) -> bool | dict` on your toolset
    - Return `False` to skip approval
-   - Return `True` for default presentation
-   - Return `dict` with custom presentation (description, payload, etc.)
+   - Return `True` for default display
+   - Return `dict` with custom context (description, payload, operation)
 3. **Full control**: Use `ApprovalController` with modes for different environments
 
 ---

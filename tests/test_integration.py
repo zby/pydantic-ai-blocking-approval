@@ -308,7 +308,7 @@ class ShellToolset(AbstractToolset):
 
         Returns:
             - False: safe command, no approval needed
-            - dict: dangerous command, approval needed with custom presentation
+            - dict: dangerous command, approval needed with custom context
         """
         if tool_name != "shell_exec":
             return True  # Unknown tools require approval
@@ -321,7 +321,7 @@ class ShellToolset(AbstractToolset):
                 return {
                     "description": f"Execute potentially dangerous command: {command}",
                     "payload": {"command": command, "pattern": pattern},
-                    "presentation": {
+                    "operation": {
                         "type": "command",
                         "content": command,
                         "metadata": {"warning": f"Matched dangerous pattern: {pattern}"},
@@ -367,7 +367,7 @@ class TestShellToolsetApproval:
         assert toolset.needs_approval("shell_exec", {"command": "echo hello"}) is False
 
     def test_needs_approval_dangerous_patterns(self):
-        """Test that dangerous patterns return dict with custom presentation."""
+        """Test that dangerous patterns return dict with operation descriptor."""
         toolset = ShellToolset()
 
         # rm command
@@ -375,17 +375,17 @@ class TestShellToolsetApproval:
         assert isinstance(result, dict)
         assert "dangerous" in result["description"].lower()
         assert result["payload"]["command"] == "rm -rf /tmp/files"
-        assert "warning" in result["presentation"]["metadata"]
+        assert "warning" in result["operation"]["metadata"]
 
         # sudo command
         result = toolset.needs_approval("shell_exec", {"command": "sudo apt update"})
         assert isinstance(result, dict)
-        assert "sudo" in result["presentation"]["metadata"]["warning"]
+        assert "sudo" in result["operation"]["metadata"]["warning"]
 
         # pipe
         result = toolset.needs_approval("shell_exec", {"command": "ls | grep foo"})
         assert isinstance(result, dict)
-        assert "|" in result["presentation"]["metadata"]["warning"]
+        assert "|" in result["operation"]["metadata"]["warning"]
 
         # redirect
         result = toolset.needs_approval("shell_exec", {"command": "echo x > file"})
@@ -417,15 +417,15 @@ class TestShellToolsetApproval:
         assert isinstance(result, dict)
 
     def test_needs_approval_unknown_commands(self):
-        """Test that unknown commands require approval with basic presentation."""
+        """Test that unknown commands require approval with basic context."""
         toolset = ShellToolset()
 
         result = toolset.needs_approval("shell_exec", {"command": "mycustomtool --flag"})
         assert isinstance(result, dict)
         assert "mycustomtool" in result["description"]
         assert result["payload"]["command"] == "mycustomtool --flag"
-        # Unknown commands don't have the "warning" key in presentation
-        assert "presentation" not in result or result.get("presentation") is None
+        # Unknown commands don't have the "warning" key in operation
+        assert "operation" not in result or result.get("operation") is None
 
     def test_approval_toolset_skips_safe_command(self):
         """Test ApprovalToolset skips approval for safe commands."""
@@ -457,7 +457,7 @@ class TestShellToolsetApproval:
         assert "Executed: ls -la" in result
 
     def test_approval_toolset_prompts_for_dangerous_command(self):
-        """Test ApprovalToolset prompts for dangerous commands with custom presentation."""
+        """Test ApprovalToolset prompts for dangerous commands with operation descriptor."""
         approval_requests: list[ApprovalRequest] = []
 
         def approve_callback(request: ApprovalRequest) -> ApprovalDecision:
@@ -484,8 +484,8 @@ class TestShellToolsetApproval:
         assert req.tool_name == "shell_exec"
         assert "dangerous" in req.description.lower()
         assert req.payload["command"] == "rm -rf /tmp/old_files"
-        assert req.presentation is not None
-        assert req.presentation.metadata["warning"] is not None
+        assert req.operation is not None
+        assert req.operation.metadata["warning"] is not None
         assert "rm -rf /tmp/old_files" in shell_toolset._executed_commands
 
     def test_approval_toolset_denies_command(self):

@@ -51,7 +51,7 @@ from .decorator import requires_approval
 from .memory import ApprovalMemory
 from .protocol import ApprovalConfigurable
 from .toolset import ApprovalToolset
-from .types import ApprovalDecision, ApprovalPresentation, ApprovalRequest
+from .types import ApprovalDecision, ApprovalRequest, OperationDescriptor
 
 __version__ = "0.1.0"
 
@@ -60,8 +60,8 @@ __all__ = [
     "ApprovalController",
     "ApprovalDecision",
     "ApprovalMemory",
-    "ApprovalPresentation",
     "ApprovalRequest",
     "ApprovalToolset",
+    "OperationDescriptor",
     "requires_approval",
 ]

@@ -228,20 +228,20 @@ decision = ApprovalDecision(approved=True, remember="session")
 
 The cache key is `(tool_name, payload)`, so tools control matching granularity via their payload design.
 
-## Rich Presentation (Highly Experimental)
+## Operation Descriptors (Highly Experimental)
 
-> **Note**: This feature is highly experimental. The `ApprovalPresentation` structure will likely change.
+> **Note**: This feature is highly experimental. The `OperationDescriptor` structure will likely change.
 
-Tools can provide enhanced UI hints via `ApprovalPresentation`:
+Tools can describe their operations for richer approval display via `OperationDescriptor`:
 
 ```python
-from pydantic_ai_blocking_approval import ApprovalPresentation, ApprovalRequest
+from pydantic_ai_blocking_approval import OperationDescriptor, ApprovalRequest
 
 request = ApprovalRequest(
     tool_name="write_file",
     description="Write to config.json",
     payload={"path": "config.json"},
-    presentation=ApprovalPresentation(
+    operation=OperationDescriptor(
         type="diff",
         content="- old value\n+ new value",
         language="json",
@@ -249,7 +249,7 @@ request = ApprovalRequest(
 )
 ```
 
-Supported presentation types:
+Supported operation types:
 - `text` - Plain text
 - `diff` - Side-by-side diff
 - `file_content` - Syntax-highlighted code
@@ -262,7 +262,7 @@ Supported presentation types:
 
 - `ApprovalRequest` - Request object when approval is needed
 - `ApprovalDecision` - User's decision (approved, note, remember)
-- `ApprovalPresentation` - Rich UI hints for display
+- `OperationDescriptor` - Describes the operation for display
 
 ### Classes
 

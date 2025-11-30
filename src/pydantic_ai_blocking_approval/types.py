@@ -1,7 +1,7 @@
 """Core approval types.
 
 This module defines the fundamental data types for the blocking approval system:
-- ApprovalPresentation: Rich UI hints for approval display
+- OperationDescriptor: Describes the operation for approval context
 - ApprovalRequest: Returned by tools to request approval
 - ApprovalDecision: User's decision about a tool call
 """
@@ -12,17 +12,18 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-class ApprovalPresentation(BaseModel):
-    """Rich presentation data for approval UI.
+class OperationDescriptor(BaseModel):
+    """Describes the operation for approval context.
 
-    Optional - tools can provide this for enhanced display (diffs, syntax highlighting).
+    Optional - tools can provide this for richer approval display.
     If not provided, the approval prompt renders from tool_name + args.
+    The CLI layer uses this to decide how to present the operation.
 
     Attributes:
-        type: The presentation type determining how content should be rendered
+        type: The type of operation/content (e.g., diff, command, file_content)
         content: The actual content to display
         language: Optional language hint for syntax highlighting
-        metadata: Additional presentation metadata
+        metadata: Additional operation metadata
     """
 
     type: Literal["text", "diff", "file_content", "command", "structured"]
@@ -41,13 +42,13 @@ class ApprovalRequest(BaseModel):
         tool_name: Name of the tool requesting approval
         description: Human-readable description of what the tool wants to do
         payload: Data for session matching (determines if cached approval applies)
-        presentation: Optional rich UI hints for enhanced display
+        operation: Optional descriptor of the operation for richer display
     """
 
     tool_name: str
     description: str
     payload: dict[str, Any]
-    presentation: Optional[ApprovalPresentation] = None
+    operation: Optional[OperationDescriptor] = None
 
 
 class ApprovalDecision(BaseModel):
