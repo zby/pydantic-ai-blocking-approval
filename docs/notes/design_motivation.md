@@ -8,17 +8,16 @@
 
 This package is experimental. All APIs may change.
 
-**More mature:**
-- `ApprovalToolset` wrapper with `pre_approved` list
+**Core components:**
+- `ApprovalToolset` wrapper with `config` dict for per-tool settings
 - `ApprovalController` with modes (interactive/approve_all/strict)
 - `ApprovalMemory` for session caching
 - `ApprovalDecision` with `remember="session"`
 
-**Highly experimental (likely to change significantly):**
-- `needs_approval() -> bool | dict` protocol for complex pattern-based approval
-- Custom description in `needs_approval()` return
+**Extension point:**
+- Subclass `ApprovalToolset` and override `needs_approval()` for custom logic
 
-The pattern-based approval examples (like `ShellToolset` in tests) demonstrate the *intended* design direction, but no production toolsets have been built yet. The `needs_approval()` API will likely evolve significantly as we learn from real implementations.
+The pattern-based approval examples (like `ShellApprovalToolset` in tests) demonstrate the *intended* design direction for custom approval logic.
 
 ---
 
@@ -53,28 +52,42 @@ The architecture addresses each of these concerns through layered abstractions.
 
 This eliminates the coupling and lets the toolset make one decision with all the context.
 
-### 2. Why `pre_approved` list AND `needs_approval()` method?
+### 2. Why `config` dict AND subclassing?
 
 These serve different use cases:
 
 | Mechanism | Use Case | Example |
 |-----------|----------|---------|
-| `pre_approved` list | Simple static allowlist | `pre_approved=["get_time", "list_files"]` |
-| `needs_approval()` | Dynamic per-call decisions | Shell command pattern matching |
+| `config` dict | Simple static allowlist | `config={"get_time": {"pre_approved": True}}` |
+| Subclass `ApprovalToolset` | Dynamic per-call decisions | Shell command pattern matching |
 
-**Simple case**: A basic toolset with a few safe read-only tools just uses `pre_approved`.
-
-**Complex case**: A shell executor needs to analyze each command:
+**Simple case**: A basic toolset with a few safe read-only tools just uses `config`:
 ```python
-def needs_approval(self, tool_name, args):
-    command = args["command"]
-    if command.startswith("ls "):
-        return False  # Safe
-    if "rm " in command:
-        return {"description": f"Delete: {command}", ...}  # Dangerous
+ApprovalToolset(
+    inner=my_toolset,
+    config={
+        "get_time": {"pre_approved": True},
+        "list_files": {"pre_approved": True},
+    },
+)
 ```
 
-Without `pre_approved`, simple toolsets would need to implement `needs_approval()` just to return `False` for safe tools.
+**Complex case**: A shell executor needs to analyze each command by subclassing:
+```python
+class ShellApprovalToolset(ApprovalToolset):
+    def needs_approval(self, name, tool_args):
+        tool_config = self.config.get(name, {})
+        if tool_config.get("pre_approved"):
+            return False
+        command = tool_args.get("command", "")
+        if command.startswith("ls "):
+            return False  # Safe
+        if "rm " in command:
+            return {"description": f"Delete: {command}"}  # Dangerous
+        return True
+```
+
+Without `config`, simple toolsets would need to subclass just to return `False` for safe tools.
 
 ### 3. Why "secure by default" (unlisted tools require approval)?
 
@@ -157,13 +170,13 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 | 1. Pause on guarded tool | ✅ | `approval_callback` blocks until decision |
 | 2. Approve and resume | ✅ | Approval unblocks, execution continues |
 | 3. Reject with feedback | ✅ | `ApprovalDecision(approved=False, note="...")` |
-| 4. Pre-approve in config | ✅ | `pre_approved` list + `needs_approval()` |
+| 4. Pre-approve in config | ✅ | `config` dict with `pre_approved: True` |
 | 5. Approve for session | ✅ | `remember="session"` + `ApprovalMemory` |
 | 6. Auto-approve all | ✅ | `ApprovalController(mode="approve_all")` |
 | 7. Strict mode | ✅ | `ApprovalController(mode="strict")` |
 | 8. Shell command approval | ✅ | Any tool can require approval |
-| 9. Pattern-based pre-approval | ✅ | `needs_approval()` with pattern matching |
-| 10. Block dangerous commands | ✅ | `needs_approval()` raises `PermissionError` |
+| 9. Pattern-based pre-approval | ✅ | Subclass `ApprovalToolset`, override `needs_approval()` |
+| 10. Block dangerous commands | ✅ | Subclass returns `True`, callback denies, raises `PermissionError` |
 | 11-13. Worker/delegation approval | ✅ | Generic — any tool type works |
 | 14. See approval history | ✅ | `ApprovalMemory.list_approvals()` |
 | 15-18. Rich presentation | ⚠️ | CLI responsibility (see note below) |
@@ -210,9 +223,9 @@ This separation keeps the approval library simple and decoupled from UI concerns
 ┌─────────────────────────────────────────────────────────────┐
 │                    ApprovalToolset                          │
 │  • Wraps any AbstractToolset                                │
-│  • Checks pre_approved list                                 │
-│  • Calls needs_approval() on inner toolset                  │
-│  • Builds ApprovalRequest with presentation                 │
+│  • Calls needs_approval() — override in subclass for custom │
+│  • Default checks config[name]["pre_approved"]              │
+│  • Builds ApprovalRequest with description                  │
 │  • Consults cache, calls approval_callback, handles decision│
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -220,15 +233,15 @@ This separation keeps the approval library simple and decoupled from UI concerns
 ┌─────────────────────────────────────────────────────────────┐
 │                    Inner Toolset                            │
 │  • Implements actual tool logic                             │
-│  • Optionally implements needs_approval() -> bool | dict    │
+│  • No awareness of approval — that's ApprovalToolset's job  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 Each layer has a single responsibility:
 - **CLI**: User interaction and display
 - **Controller**: Mode-based behavior and session memory
-- **ApprovalToolset**: Approval flow orchestration
-- **Inner Toolset**: Domain logic and approval decisions
+- **ApprovalToolset**: Approval flow orchestration (subclass for custom logic)
+- **Inner Toolset**: Domain logic only (no approval awareness)
 
 ---
 
@@ -245,4 +258,4 @@ Each layer has a single responsibility:
 - No session caching needed
 - Single environment (no mode switching)
 
-The architecture is designed to be adoptable incrementally — start with `ApprovalToolset` + simple `approval_callback`, add `ApprovalController` when you need modes, add `needs_approval()` when you need per-call decisions.
+The architecture is designed to be adoptable incrementally — start with `ApprovalToolset` + simple `approval_callback`, add `ApprovalController` when you need modes, subclass with custom `needs_approval()` when you need per-call decisions.

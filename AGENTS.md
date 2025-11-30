@@ -28,20 +28,18 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 |--------|---------|
 | `types.py` | Core data types: `ApprovalRequest`, `ApprovalDecision` |
 | `memory.py` | Session cache for "approve for session" decisions |
-| `protocol.py` | `ApprovalConfigurable` protocol |
-| `toolset.py` | `ApprovalToolset` wrapper that intercepts tool calls |
+| `toolset.py` | `ApprovalToolset` wrapper that intercepts tool calls; subclass for custom logic |
 | `controller.py` | `ApprovalController` with mode-based behavior |
-| `decorator.py` | `@requires_approval` marker decorator |
 
 ---
 
 ## Integration Patterns
 
-1. **Simple**: Add safe tool names to `pre_approved` list — all others require approval (secure by default)
-2. **Custom logic**: Implement `needs_approval(tool_name, args) -> bool | dict` on your toolset
+1. **Simple**: Use `config={"tool_name": {"pre_approved": True}}` — all others require approval (secure by default)
+2. **Custom logic**: Subclass `ApprovalToolset` and override `needs_approval(name, tool_args)`
    - Return `False` to skip approval
    - Return `True` for default presentation
-   - Return `dict` with custom description
+   - Return `dict` with custom description (`{"description": "..."}`)
 3. **Full control**: Use `ApprovalController` with modes for different environments
 
 ---
@@ -60,7 +58,7 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 - Session cache key is `(tool_name, tool_args)` — identical args = cached approval
 - `PermissionError` is raised on denial; callers should handle this gracefully
 - `approval_callback` blocks execution — ensure it returns promptly in non-interactive modes
-- Tools IN `pre_approved` list skip approval (secure by default: unlisted tools require approval)
+- Tools with `config[name]["pre_approved"]=True` skip approval (secure by default: unlisted tools require approval)
 
 ---
 

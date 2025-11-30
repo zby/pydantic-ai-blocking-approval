@@ -83,8 +83,8 @@ With **deferred approval**, the agent run terminates on rejection, requiring a n
 ```
 ApprovalToolset (wraps any toolset)
     ├── intercepts call_tool()
-    ├── checks pre_approved list (which tools skip approval)
-    ├── calls needs_approval() if toolset implements it (per-call decision)
+    ├── calls needs_approval(name, tool_args) — override for custom logic
+    ├── default: checks config[tool_name]["pre_approved"]
     ├── consults ApprovalMemory for cached decisions
     ├── calls approval_callback and BLOCKS until user decides
     └── proceeds or raises PermissionError
@@ -95,7 +95,7 @@ ApprovalController (manages modes)
     └── strict — auto-deny (safety)
 ```
 
-**Secure by default**: Tools not in the `pre_approved` list require approval. This ensures forgotten tools prompt rather than silently execute.
+**Secure by default**: Tools not configured with `pre_approved: True` require approval. This ensures forgotten tools prompt rather than silently execute.
 
 ## Installation
 
@@ -122,12 +122,16 @@ def my_approval_callback(request: ApprovalRequest) -> ApprovalDecision:
         return ApprovalDecision(approved=True, remember="session")
     return ApprovalDecision(approved=response.lower() == "y")
 
-# Wrap your toolset with approval
+# Wrap your toolset with approval using per-tool config
 controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
 approved_toolset = ApprovalToolset(
     inner=my_toolset,
     approval_callback=controller.approval_callback,
     memory=controller.memory,
+    config={
+        "safe_tool": {"pre_approved": True},
+        # All other tools require approval (secure by default)
+    },
 )
 
 # Use with PydanticAI agent
@@ -154,63 +158,64 @@ controller = ApprovalController(mode="strict")
 
 ## Integration Patterns
 
-### Pattern 1: @requires_approval Decorator
+### Pattern 1: Config-Based Pre-Approval
 
-Mark individual functions as requiring approval:
-
-```python
-from pydantic_ai_blocking_approval import requires_approval
-
-@requires_approval
-def send_email(to: str, subject: str, body: str) -> str:
-    """Send an email - requires user approval."""
-    return f"Email sent to {to}"
-```
-
-### Pattern 2: pre_approved List
-
-Specify which tools skip approval via the `pre_approved` parameter:
+Specify which tools skip approval via the `config` parameter:
 
 ```python
 approved_toolset = ApprovalToolset(
     inner=my_toolset,
     approval_callback=my_approval_callback,
-    pre_approved=["get_time", "list_files", "get_weather"],
+    config={
+        "get_time": {"pre_approved": True},
+        "list_files": {"pre_approved": True},
+        "get_weather": {"pre_approved": True},
+        # All other tools require approval (secure by default)
+    },
 )
 ```
 
-Tools in the list skip approval. Tools not in the list require approval by default (secure by default).
+Tools with `pre_approved: True` skip approval. Tools not in config require approval by default (secure by default).
 
-### Pattern 3: Custom Approval Logic (Highly Experimental)
+### Pattern 2: Custom Approval Logic via Subclass
 
-> **Note**: This pattern is highly experimental and likely to change significantly as we build production toolsets.
-
-For complex tools (like file sandboxes or shell executors), implement `needs_approval()` to decide per-call:
+For complex tools (like file sandboxes or shell executors), subclass `ApprovalToolset` and override `needs_approval()`:
 
 ```python
-class MyToolset:
-    def needs_approval(self, tool_name: str, args: dict) -> bool | dict:
-        """Decide if approval is needed and customize presentation.
+class ShellApprovalToolset(ApprovalToolset):
+    """Shell command approval with pattern matching."""
 
-        Returns:
-            - False: no approval needed
-            - True: approval needed with default presentation
-            - dict: approval needed with custom presentation
-        """
-        if tool_name != "shell_exec":
+    SAFE_COMMANDS = {"ls", "pwd", "echo", "date"}
+
+    def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
+        # Check pre_approved config first
+        tool_config = self.config.get(name, {})
+        if tool_config.get("pre_approved"):
             return False
 
-        command = args["command"]
-        if self._is_safe_command(command):
-            return False
+        # Custom logic for shell_exec
+        if name == "shell_exec":
+            command = tool_args.get("command", "")
+            base_cmd = command.split()[0] if command else ""
 
-        # Dangerous command - require approval with custom description
-        return {
-            "description": f"Execute: {command[:50]}...",
-        }
+            if base_cmd in self.SAFE_COMMANDS:
+                return False  # Safe command
+
+            return {"description": f"Execute: {command}"}
+
+        return True  # Default: require approval
+
+# Usage
+toolset = ShellApprovalToolset(
+    inner=shell_toolset,
+    approval_callback=callback,
+    config={
+        "get_cwd": {"pre_approved": True},  # Additional pre-approved tools
+    },
+)
 ```
 
-See `tests/test_integration.py` for a complete `ShellToolset` example with pattern matching.
+See `tests/test_integration.py` for a complete example with pattern matching for safe commands and dangerous patterns.
 
 ## Session Approval Caching
 
@@ -237,16 +242,8 @@ The cache key is `(tool_name, tool_args)`.
 ### Classes
 
 - `ApprovalMemory` - Session cache for "approve for session"
-- `ApprovalToolset` - Wrapper that intercepts tool calls
+- `ApprovalToolset` - Wrapper that intercepts tool calls (subclass for custom logic)
 - `ApprovalController` - Mode-based controller
-
-### Protocols
-
-- `ApprovalConfigurable` - Protocol for toolsets with `needs_approval() -> bool | dict`
-
-### Decorators
-
-- `@requires_approval` - Mark functions as needing approval
 
 ## License
 

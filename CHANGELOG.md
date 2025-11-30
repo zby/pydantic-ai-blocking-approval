@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-11-30
+
+### Removed
+
+- **BREAKING**: Removed `@requires_approval` decorator
+  - Config is now the single source of truth for pre-approval
+  - Default behavior is "require approval" (secure by default)
+- **BREAKING**: Removed `ApprovalConfigurable` protocol
+  - Inner toolset no longer needs awareness of approval
+  - Custom approval logic should subclass `ApprovalToolset` instead
+- **BREAKING**: Removed `protocol.py` and `decorator.py` modules
+
+### Changed
+
+- **BREAKING**: Replaced `pre_approved: list[str]` parameter with `config: dict[str, dict]`
+  - Old: `ApprovalToolset(inner=toolset, pre_approved=["tool_a", "tool_b"])`
+  - New: `ApprovalToolset(inner=toolset, config={"tool_a": {"pre_approved": True}})`
+  - Per-tool configuration allows future extension with additional settings
+- **BREAKING**: Made `needs_approval()` a public method on `ApprovalToolset`
+  - Subclass `ApprovalToolset` and override `needs_approval()` for custom logic
+  - Default implementation checks `config[tool_name]["pre_approved"]`
+  - Inner toolset no longer implements `needs_approval()` — that's the wrapper's job
+- Secure by default: tools not in config require approval
+
+### Migration
+
+From `pre_approved` list:
+```python
+# Old (0.3.0)
+ApprovalToolset(inner=toolset, pre_approved=["tool_a", "tool_b"])
+
+# New (0.4.0)
+ApprovalToolset(
+    inner=toolset,
+    config={"tool_a": {"pre_approved": True}, "tool_b": {"pre_approved": True}},
+)
+```
+
+From inner `needs_approval()`:
+```python
+# Old (0.3.0): inner toolset implements needs_approval()
+class MyToolset(AbstractToolset):
+    def needs_approval(self, name, args):
+        # custom logic
+
+ApprovalToolset(inner=MyToolset(), ...)
+
+# New (0.4.0): subclass ApprovalToolset instead
+class MyApprovalToolset(ApprovalToolset):
+    def needs_approval(self, name, tool_args):
+        # custom logic (same as before)
+
+MyApprovalToolset(inner=BasicToolset(), ...)
+```
+
 ## [0.3.0] - 2025-11-30
 
 ### Removed

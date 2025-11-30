@@ -15,7 +15,6 @@ from pydantic_ai_blocking_approval import (
     ApprovalMemory,
     ApprovalRequest,
     ApprovalToolset,
-    requires_approval,
 )
 
 
@@ -23,14 +22,13 @@ class TestApprovalIntegration:
     """Integration tests for approval flow with real agent."""
 
     def test_tool_requires_approval_and_denied(self):
-        """Test that a tool with @requires_approval raises PermissionError when denied."""
+        """Test that a tool requires approval by default and raises PermissionError when denied."""
         approval_requests: list[ApprovalRequest] = []
 
         def deny_callback(request: ApprovalRequest) -> ApprovalDecision:
             approval_requests.append(request)
             return ApprovalDecision(approved=False, note="User denied")
 
-        @requires_approval
         def delete_file(path: str) -> str:
             """Delete a file at the given path."""
             return f"Deleted {path}"
@@ -38,7 +36,7 @@ class TestApprovalIntegration:
         # Create a FunctionToolset with our tool
         inner_toolset = FunctionToolset([delete_file])
 
-        # Wrap with approval
+        # Wrap with approval (no config = requires approval by default)
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
             approval_callback=deny_callback,
@@ -67,14 +65,13 @@ class TestApprovalIntegration:
         assert "User denied" in str(exc_info.value)
 
     def test_tool_requires_approval_and_approved(self):
-        """Test that a tool with @requires_approval executes when approved."""
+        """Test that a tool executes when approved."""
         approval_requests: list[ApprovalRequest] = []
 
         def approve_callback(request: ApprovalRequest) -> ApprovalDecision:
             approval_requests.append(request)
             return ApprovalDecision(approved=True)
 
-        @requires_approval
         def send_email(to: str, subject: str) -> str:
             """Send an email."""
             return f"Email sent to {to} with subject: {subject}"
@@ -109,7 +106,6 @@ class TestApprovalIntegration:
         """Test that approve_all mode auto-approves without prompting."""
         controller = ApprovalController(mode="approve_all")
 
-        @requires_approval
         def dangerous_action() -> str:
             """Do something dangerous."""
             return "Action completed"
@@ -140,7 +136,6 @@ class TestApprovalIntegration:
         """Test that strict mode auto-denies all requests with PermissionError."""
         controller = ApprovalController(mode="strict")
 
-        @requires_approval
         def write_file(path: str, content: str) -> str:
             """Write content to a file."""
             return f"Wrote to {path}"
@@ -206,7 +201,7 @@ class TestApprovalIntegration:
         assert "Processed" in result.output or "hello" in result.output
 
     def test_pre_approved_tool_skips_approval(self):
-        """Test that tools in pre_approved list execute without prompting."""
+        """Test that tools with pre_approved=True in config execute without prompting."""
         callback_called = False
 
         def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
@@ -222,7 +217,7 @@ class TestApprovalIntegration:
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
             approval_callback=should_not_be_called,
-            pre_approved=["safe_action"],
+            config={"safe_action": {"pre_approved": True}},
         )
 
         agent = Agent(
@@ -243,13 +238,11 @@ class TestApprovalIntegration:
         assert "Processed" in result.output or "hello" in result.output
 
 
-class ShellToolset(AbstractToolset):
-    """Example shell command toolset with patterned approval logic.
+class ShellApprovalToolset(ApprovalToolset):
+    """Example shell command approval toolset with pattern matching.
 
-    Demonstrates how to implement needs_approval() with:
-    - Safe commands that skip approval (ls, pwd, echo, cat for safe paths)
-    - Dangerous patterns that always require approval (rm, sudo, pipes, etc.)
-    - Custom presentation for dangerous commands
+    Demonstrates how to subclass ApprovalToolset and override needs_approval()
+    for custom approval logic based on command patterns.
     """
 
     # Commands that are always safe (read-only, no side effects)
@@ -270,6 +263,49 @@ class ShellToolset(AbstractToolset):
 
     # Paths that are safe to read
     SAFE_READ_PATHS = {"/tmp", "/var/log", "."}
+
+    def needs_approval(self, name: str, tool_args: dict[str, Any]) -> bool | dict:
+        """Decide if shell command needs approval based on patterns."""
+        tool_config = self.config.get(name, {})
+
+        # Check pre_approved first
+        if tool_config.get("pre_approved"):
+            return False
+
+        if name != "shell_exec":
+            return True  # Unknown tools require approval
+
+        command = tool_args.get("command", "")
+
+        # Check for dangerous patterns first (highest priority)
+        for pattern in self.DANGEROUS_PATTERNS:
+            if re.search(pattern, command):
+                return {
+                    "description": f"Execute potentially dangerous command: {command}",
+                }
+
+        # Check if it's a safe command
+        base_command = command.split()[0] if command.split() else ""
+        safe_commands = tool_config.get("safe_commands", self.SAFE_COMMANDS)
+        if base_command in safe_commands:
+            # Additional check for cat/head/tail - verify path is safe
+            if base_command in {"cat", "head", "tail"} and len(command.split()) > 1:
+                path = command.split()[1]
+                safe_paths = tool_config.get("safe_read_paths", self.SAFE_READ_PATHS)
+                if not any(path.startswith(safe) for safe in safe_paths):
+                    return {
+                        "description": f"Read file outside safe paths: {path}",
+                    }
+            return False  # Safe command, no approval needed
+
+        # Unknown command - require approval
+        return {
+            "description": f"Execute command: {command}",
+        }
+
+
+class ShellToolset(AbstractToolset):
+    """Simple shell toolset (inner toolset for testing)."""
 
     def __init__(self) -> None:
         self._executed_commands: list[str] = []
@@ -303,53 +339,17 @@ class ShellToolset(AbstractToolset):
             return f"Executed: {command}"
         raise ValueError(f"Unknown tool: {name}")
 
-    def needs_approval(self, tool_name: str, args: dict[str, Any]) -> bool | dict:
-        """Decide if shell command needs approval based on patterns.
 
-        Returns:
-            - False: safe command, no approval needed
-            - dict: dangerous command, approval needed with custom presentation
-        """
-        if tool_name != "shell_exec":
-            return True  # Unknown tools require approval
-
-        command = args.get("command", "")
-
-        # Check for dangerous patterns first (highest priority)
-        for pattern in self.DANGEROUS_PATTERNS:
-            if re.search(pattern, command):
-                return {
-                    "description": f"Execute potentially dangerous command: {command}",
-                }
-
-        # Check if it's a safe command
-        base_command = command.split()[0] if command.split() else ""
-        if base_command in self.SAFE_COMMANDS:
-            # Additional check for cat/head/tail - verify path is safe
-            if base_command in {"cat", "head", "tail"} and len(command.split()) > 1:
-                path = command.split()[1]
-                if not any(path.startswith(safe) for safe in self.SAFE_READ_PATHS):
-                    return {
-                        "description": f"Read file outside safe paths: {path}",
-                    }
-            return False  # Safe command, no approval needed
-
-        # Unknown command - require approval with default presentation
-        return {
-            "description": f"Execute command: {command}",
-        }
-
-
-class TestShellToolsetApproval:
-    """Tests for shell command toolset with patterned approval logic.
-
-    These tests verify the needs_approval() pattern matching directly
-    and the ApprovalToolset integration via call_tool().
-    """
+class TestShellApprovalToolset:
+    """Tests for shell command approval toolset with pattern matching."""
 
     def test_needs_approval_safe_commands(self):
         """Test that safe commands return False from needs_approval."""
-        toolset = ShellToolset()
+        shell_toolset = ShellToolset()
+        toolset = ShellApprovalToolset(
+            inner=shell_toolset,
+            approval_callback=lambda r: ApprovalDecision(approved=True),
+        )
 
         # Safe commands should return False
         assert toolset.needs_approval("shell_exec", {"command": "ls -la"}) is False
@@ -360,7 +360,11 @@ class TestShellToolsetApproval:
 
     def test_needs_approval_dangerous_patterns(self):
         """Test that dangerous patterns return dict with custom description."""
-        toolset = ShellToolset()
+        shell_toolset = ShellToolset()
+        toolset = ShellApprovalToolset(
+            inner=shell_toolset,
+            approval_callback=lambda r: ApprovalDecision(approved=True),
+        )
 
         # rm command
         result = toolset.needs_approval("shell_exec", {"command": "rm -rf /tmp/files"})
@@ -388,7 +392,11 @@ class TestShellToolsetApproval:
 
     def test_needs_approval_cat_safe_paths(self):
         """Test that cat on safe paths doesn't require approval."""
-        toolset = ShellToolset()
+        shell_toolset = ShellToolset()
+        toolset = ShellApprovalToolset(
+            inner=shell_toolset,
+            approval_callback=lambda r: ApprovalDecision(approved=True),
+        )
 
         # Safe paths
         assert toolset.needs_approval("shell_exec", {"command": "cat /tmp/test.log"}) is False
@@ -397,7 +405,11 @@ class TestShellToolsetApproval:
 
     def test_needs_approval_cat_unsafe_paths(self):
         """Test that cat on sensitive paths requires approval."""
-        toolset = ShellToolset()
+        shell_toolset = ShellToolset()
+        toolset = ShellApprovalToolset(
+            inner=shell_toolset,
+            approval_callback=lambda r: ApprovalDecision(approved=True),
+        )
 
         # Unsafe paths
         result = toolset.needs_approval("shell_exec", {"command": "cat /etc/passwd"})
@@ -409,14 +421,18 @@ class TestShellToolsetApproval:
 
     def test_needs_approval_unknown_commands(self):
         """Test that unknown commands require approval with description."""
-        toolset = ShellToolset()
+        shell_toolset = ShellToolset()
+        toolset = ShellApprovalToolset(
+            inner=shell_toolset,
+            approval_callback=lambda r: ApprovalDecision(approved=True),
+        )
 
         result = toolset.needs_approval("shell_exec", {"command": "mycustomtool --flag"})
         assert isinstance(result, dict)
         assert "mycustomtool" in result["description"]
 
     def test_approval_toolset_skips_safe_command(self):
-        """Test ApprovalToolset skips approval for safe commands."""
+        """Test ShellApprovalToolset skips approval for safe commands."""
         callback_called = False
 
         def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
@@ -425,7 +441,7 @@ class TestShellToolsetApproval:
             return ApprovalDecision(approved=True)
 
         shell_toolset = ShellToolset()
-        approved_toolset = ApprovalToolset(
+        approved_toolset = ShellApprovalToolset(
             inner=shell_toolset,
             approval_callback=should_not_be_called,
         )
@@ -445,7 +461,7 @@ class TestShellToolsetApproval:
         assert "Executed: ls -la" in result
 
     def test_approval_toolset_prompts_for_dangerous_command(self):
-        """Test ApprovalToolset prompts for dangerous commands with custom presentation."""
+        """Test ShellApprovalToolset prompts for dangerous commands."""
         approval_requests: list[ApprovalRequest] = []
 
         def approve_callback(request: ApprovalRequest) -> ApprovalDecision:
@@ -453,7 +469,7 @@ class TestShellToolsetApproval:
             return ApprovalDecision(approved=True)
 
         shell_toolset = ShellToolset()
-        approved_toolset = ApprovalToolset(
+        approved_toolset = ShellApprovalToolset(
             inner=shell_toolset,
             approval_callback=approve_callback,
         )
@@ -475,9 +491,9 @@ class TestShellToolsetApproval:
         assert "rm -rf /tmp/old_files" in shell_toolset._executed_commands
 
     def test_approval_toolset_denies_command(self):
-        """Test ApprovalToolset raises PermissionError when denied."""
+        """Test ShellApprovalToolset raises PermissionError when denied."""
         shell_toolset = ShellToolset()
-        approved_toolset = ApprovalToolset(
+        approved_toolset = ShellApprovalToolset(
             inner=shell_toolset,
             approval_callback=lambda req: ApprovalDecision(
                 approved=False, note="Too dangerous"
@@ -498,7 +514,7 @@ class TestShellToolsetApproval:
         assert len(shell_toolset._executed_commands) == 0  # Never executed
 
     def test_session_caching_for_commands(self):
-        """Test session approval caching works with command-based payloads."""
+        """Test session approval caching works with command-based args."""
         approval_count = 0
         memory = ApprovalMemory()
 
@@ -508,7 +524,7 @@ class TestShellToolsetApproval:
             return ApprovalDecision(approved=True, remember="session")
 
         shell_toolset = ShellToolset()
-        approved_toolset = ApprovalToolset(
+        approved_toolset = ShellApprovalToolset(
             inner=shell_toolset,
             approval_callback=approve_for_session,
             memory=memory,
@@ -548,9 +564,33 @@ class TestShellToolsetApproval:
         assert approval_count == 2  # Now 2, different command
 
     def test_unknown_tool_requires_approval(self):
-        """Test that unknown tools (not shell_exec) require approval."""
-        toolset = ShellToolset()
+        """Test that unknown tools require approval."""
+        shell_toolset = ShellToolset()
+        toolset = ShellApprovalToolset(
+            inner=shell_toolset,
+            approval_callback=lambda r: ApprovalDecision(approved=True),
+        )
 
         # Unknown tool should return True (require approval)
         result = toolset.needs_approval("unknown_tool", {"arg": "value"})
         assert result is True
+
+    def test_config_overrides_defaults(self):
+        """Test that config can override default safe commands."""
+        shell_toolset = ShellToolset()
+        toolset = ShellApprovalToolset(
+            inner=shell_toolset,
+            approval_callback=lambda r: ApprovalDecision(approved=True),
+            config={
+                "shell_exec": {
+                    "safe_commands": ["ls"],  # Only ls is safe
+                },
+            },
+        )
+
+        # ls should still be safe
+        assert toolset.needs_approval("shell_exec", {"command": "ls -la"}) is False
+
+        # pwd is no longer in safe_commands, so requires approval
+        result = toolset.needs_approval("shell_exec", {"command": "pwd"})
+        assert isinstance(result, dict)  # Requires approval

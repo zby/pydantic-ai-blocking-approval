@@ -11,7 +11,6 @@ Key Components:
     - ApprovalMemory: Session cache for "approve for session" functionality
     - ApprovalToolset: Wrapper that intercepts tool calls for approval
     - ApprovalController: Mode-based controller (interactive/approve_all/strict)
-    - @requires_approval: Simple decorator to mark functions needing approval
 
 Example:
     from pydantic_ai import Agent
@@ -30,12 +29,16 @@ Example:
             return ApprovalDecision(approved=True, remember="session")
         return ApprovalDecision(approved=response.lower() == "y")
 
-    # Wrap your toolset with approval
+    # Wrap your toolset with approval using per-tool config
     controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
     approved_toolset = ApprovalToolset(
         inner=my_toolset,
         approval_callback=controller.approval_callback,
         memory=controller.memory,
+        config={
+            "safe_tool": {"pre_approved": True},
+            # All other tools require approval (secure by default)
+        },
     )
 
     # Use with PydanticAI agent
@@ -44,23 +47,25 @@ Example:
 For testing, use approve_all or strict modes:
     controller = ApprovalController(mode="approve_all")  # Auto-approve
     controller = ApprovalController(mode="strict")       # Auto-deny
+
+For custom approval logic, subclass ApprovalToolset and override needs_approval():
+    class MyApprovalToolset(ApprovalToolset):
+        def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
+            # Custom logic here
+            ...
 """
 
 from .controller import ApprovalController
-from .decorator import requires_approval
 from .memory import ApprovalMemory
-from .protocol import ApprovalConfigurable
 from .toolset import ApprovalToolset
 from .types import ApprovalDecision, ApprovalRequest
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
-    "ApprovalConfigurable",
     "ApprovalController",
     "ApprovalDecision",
     "ApprovalMemory",
     "ApprovalRequest",
     "ApprovalToolset",
-    "requires_approval",
 ]
