@@ -43,40 +43,42 @@ The blocking pattern is ideal when:
 | **Resume** | Explicit resume call with decisions | Automatic after user input |
 | **Best for** | Web apps, APIs, async workflows | CLI tools, interactive sessions |
 
-### Rejection and LLM Adjustment
+### Why Blocking Matters for Dangerous Actions
 
-A key advantage of blocking approval is the **immediate feedback loop**. When a user rejects a tool call, the rejection (and optional note) is returned to the LLM, which can adjust its approach within the same conversation:
+Consider: you ask the agent to "find and kill the process hogging port 8080."
 
-```python
-def cli_prompt(request: ApprovalRequest) -> ApprovalDecision:
-    print(f"Tool: {request.tool_name}")
-    print(f"Args: {request.tool_args}")
-    response = input("[y]es / [n]o: ")
-    if response.lower() == "y":
-        return ApprovalDecision(approved=True)
-    # User provides feedback for the LLM to adjust
-    reason = input("Why? ") or "User rejected"
-    return ApprovalDecision(approved=False, note=reason)
+**With deferred approval:**
+```
+Agent run completes with pending actions:
+  1. shell_exec("lsof -i :8080")    ← Needs approval (shell access)
+
+Agent run ends here - LLM can't plan further because it doesn't
+know what process is using the port until the command runs.
+
+You approve... command shows PID 1234 (node). But the agent didn't
+plan the kill command. You need a new conversation to continue.
 ```
 
-**Example conversation flow:**
+The problem: the dangerous action (shell access) produces information the LLM needs to plan the next step. With deferred approval, it can't proceed.
 
+**With blocking approval:**
 ```
-User: Delete the old log files
+Agent: I'll find what's using port 8080.
 
-LLM: [calls delete_file(path="application.log")]
-     → User rejects: "That's the current log, delete archived ones"
+[APPROVAL REQUIRED] shell_exec("lsof -i :8080")
+[y/n/s]: y
 
-LLM: [calls delete_file(path="logs/archive/2024-01.log")]
-     → User approves
+Output: node (PID 1234)
 
-LLM: [calls delete_file(path="logs/archive/2024-02.log")]
-     → User approves for session
+Agent: Found it - node process 1234. I'll kill it.
 
-LLM: [remaining archive files auto-approved from session cache]
+[APPROVAL REQUIRED] shell_exec("kill 1234")
+[y/n/s]: y
+
+Done! Process killed, port 8080 is now free.
 ```
 
-With **deferred approval**, the agent run terminates on rejection, requiring a new conversation to retry. With **blocking approval**, the LLM learns from rejection feedback and adjusts within the same run.
+The key difference: with blocking, the LLM sees the result of each approved action and plans accordingly. With deferred, dangerous actions that produce information block all further progress.
 
 ## Architecture Overview
 
