@@ -107,6 +107,8 @@ ApprovalController (manages modes)
 - `SimpleApprovalToolset`: For simple inner toolsets. Uses config to decide approval (secure by default).
 - `ApprovalToolset`: For smart inner toolsets that implement `needs_approval()`. Delegates the decision.
 
+**Note on async:** The toolset methods are `async` because PydanticAI's `AbstractToolset` interface requires it. The "blocking" refers to the `approval_callback` — a synchronous function that blocks the coroutine until the user decides. So `async def call_tool()` awaits the inner toolset, but the approval prompt in the middle is synchronous and blocking.
+
 ## Installation
 
 ```bash
