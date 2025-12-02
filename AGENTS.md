@@ -1,77 +1,58 @@
-# AGENTS.md — Field Guide for AI Agents
+# AGENTS.md — Command Reference for AI Agents
 
-Key expectations that frequently trip up automation agents. See `README.md` for setup and usage.
-
----
-
-## Key References
-
-- `README.md` — package overview, installation, usage patterns
-- `src/pydantic_ai_blocking_approval/` — source modules
-- `tests/` — test suite with usage examples
+Commands and gotchas that trip up AI agents. See `README.md` for architecture and usage patterns.
 
 ---
 
-## Development
+## Commands
 
-- Run `uv run pytest` before committing (tests use mocks, no live API calls)
-- For executing python scripts use `uv run python`
-- Style: PEP 8, type hints required, Pydantic models for data classes
-- Do not preserve backwards compatibility; prioritize cleaner design
-- Favor clear architecture over hacks; delete dead code when possible
+### Python & Testing
 
----
+```bash
+# Run tests (NOT pytest directly)
+uv run pytest
 
-## Module Responsibilities
+# Run a script (NOT python directly)
+uv run python script.py
 
-| Module | Purpose |
-|--------|---------|
-| `types.py` | Core data types: `ApprovalRequest`, `ApprovalDecision` |
-| `memory.py` | Session cache for "approve for session" decisions |
-| `toolset.py` | `BaseApprovalToolset` (abstract), `SimpleApprovalToolset` (config-based), `ApprovalToolset` (delegating) |
-| `controller.py` | `ApprovalController` with mode-based behavior |
+# Add dependency
+uv add package_name
 
----
-
-## Integration Patterns
-
-1. **Simple (config-based)**: Use `SimpleApprovalToolset` with `config={"tool_name": {"pre_approved": True}}` — all others require approval (secure by default)
-2. **Delegating**: Use `ApprovalToolset` when inner toolset implements `needs_approval(name, tool_args)`
-   - Return `False` to skip approval
-   - Return `True` for default presentation
-   - Return `dict` with custom description (`{"description": "..."}`)
-3. **Full control**: Use `ApprovalController` with modes for different environments
-
----
-
-## Git Discipline
-
-- **Never** `git add -A` — review `git status` and stage specific files
-- Check `git diff` before committing
-- Write clear commit messages (why, not just what)
-
----
-
-## Common Pitfalls
-
-- Forgetting to pass `memory` to `ApprovalToolset` disables session caching
-- Session cache key is `(tool_name, tool_args)` — identical args = cached approval
-- `PermissionError` is raised on denial; callers should handle this gracefully
-- `approval_callback` blocks execution — ensure it returns promptly in non-interactive modes
-- Tools with `config[name]["pre_approved"]=True` skip approval (secure by default: unlisted tools require approval)
-
----
-
-## Testing Modes
-
-```python
-# For unit tests - auto-approve everything
-controller = ApprovalController(mode="approve_all")
-
-# For security tests - verify all dangerous ops are blocked
-controller = ApprovalController(mode="strict")
+# Add dev dependency
+uv add --dev package_name
 ```
 
+**Why `uv run`?** This project uses `uv` for dependency management. Running `pytest` or `python` directly will fail or use wrong environment.
+
+### Git
+
+```bash
+# Stage specific files (NOT git add -A or git add .)
+git add path/to/file.py
+
+# Always review before staging
+git status
+git diff
+
+# Commit with clear message
+git commit -m "feat: add approval caching for session decisions"
+```
+
+**Why no `git add -A`?** Blindly staging everything catches unintended files (temp files, debug prints, unrelated changes). Review `git status` first.
+
 ---
 
-Stay focused, stay type-safe, trust the blocking flow.
+## Style
+
+- Type hints required on all functions
+- Pydantic models for data classes
+- Delete dead code; don't preserve backwards compatibility
+- Keep it simple; avoid over-engineering
+
+---
+
+## Quick Pitfalls
+
+- `PermissionError` is raised on denial — handle gracefully
+- Session cache key is `(tool_name, tool_args)` — identical args = cached
+- Tests use mocks, no live API calls
