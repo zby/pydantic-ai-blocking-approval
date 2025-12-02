@@ -28,15 +28,15 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 |--------|---------|
 | `types.py` | Core data types: `ApprovalRequest`, `ApprovalDecision` |
 | `memory.py` | Session cache for "approve for session" decisions |
-| `toolset.py` | `ApprovalToolset` wrapper that intercepts tool calls; subclass for custom logic |
+| `toolset.py` | `BaseApprovalToolset` (abstract), `SimpleApprovalToolset` (config-based), `ApprovalToolset` (delegating) |
 | `controller.py` | `ApprovalController` with mode-based behavior |
 
 ---
 
 ## Integration Patterns
 
-1. **Simple**: Use `config={"tool_name": {"pre_approved": True}}` — all others require approval (secure by default)
-2. **Custom logic**: Subclass `ApprovalToolset` and override `needs_approval(name, tool_args)`
+1. **Simple (config-based)**: Use `SimpleApprovalToolset` with `config={"tool_name": {"pre_approved": True}}` — all others require approval (secure by default)
+2. **Delegating**: Use `ApprovalToolset` when inner toolset implements `needs_approval(name, tool_args)`
    - Return `False` to skip approval
    - Return `True` for default presentation
    - Return `dict` with custom description (`{"description": "..."}`)
