@@ -83,10 +83,16 @@ The key difference: with blocking, the LLM sees the result of each approved acti
 ## Architecture Overview
 
 ```
-ApprovalToolset (wraps any toolset)
+SimpleApprovalToolset (config-based)
     ├── intercepts call_tool()
-    ├── calls needs_approval(name, tool_args) — override for custom logic
-    ├── default: checks config[tool_name]["pre_approved"]
+    ├── checks config[tool_name]["pre_approved"]
+    ├── consults ApprovalMemory for cached decisions
+    ├── calls approval_callback and BLOCKS until user decides
+    └── proceeds or raises PermissionError
+
+ApprovalToolset (delegating)
+    ├── intercepts call_tool()
+    ├── delegates to inner.needs_approval()
     ├── consults ApprovalMemory for cached decisions
     ├── calls approval_callback and BLOCKS until user decides
     └── proceeds or raises PermissionError
@@ -97,7 +103,9 @@ ApprovalController (manages modes)
     └── strict — auto-deny (safety)
 ```
 
-**Secure by default**: Tools not configured with `pre_approved: True` require approval. This ensures forgotten tools prompt rather than silently execute.
+**Two wrapper options:**
+- `SimpleApprovalToolset`: For simple inner toolsets. Uses config to decide approval (secure by default).
+- `ApprovalToolset`: For smart inner toolsets that implement `needs_approval()`. Delegates the decision.
 
 ## Installation
 
@@ -113,7 +121,7 @@ from pydantic_ai_blocking_approval import (
     ApprovalController,
     ApprovalDecision,
     ApprovalRequest,
-    ApprovalToolset,
+    SimpleApprovalToolset,
 )
 
 # Create a callback for interactive approval
@@ -126,7 +134,7 @@ def my_approval_callback(request: ApprovalRequest) -> ApprovalDecision:
 
 # Wrap your toolset with approval using per-tool config
 controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
-approved_toolset = ApprovalToolset(
+approved_toolset = SimpleApprovalToolset(
     inner=my_toolset,
     approval_callback=controller.approval_callback,
     memory=controller.memory,
@@ -160,12 +168,12 @@ controller = ApprovalController(mode="strict")
 
 ## Integration Patterns
 
-### Pattern 1: Config-Based Pre-Approval
+### Pattern 1: SimpleApprovalToolset (Config-Based)
 
-Specify which tools skip approval via the `config` parameter:
+Use `SimpleApprovalToolset` for simple inner toolsets. Specify which tools skip approval via the `config` parameter:
 
 ```python
-approved_toolset = ApprovalToolset(
+approved_toolset = SimpleApprovalToolset(
     inner=my_toolset,
     approval_callback=my_approval_callback,
     config={
@@ -179,20 +187,21 @@ approved_toolset = ApprovalToolset(
 
 Tools with `pre_approved: True` skip approval. Tools not in config require approval by default (secure by default).
 
-### Pattern 2: Custom Approval Logic via Subclass
+### Pattern 2: ApprovalToolset (Delegating)
 
-For complex tools (like file sandboxes or shell executors), subclass `ApprovalToolset` and override `needs_approval()`:
+Use `ApprovalToolset` when your inner toolset implements `needs_approval()`:
 
 ```python
-class ShellApprovalToolset(ApprovalToolset):
-    """Shell command approval with pattern matching."""
+from pydantic_ai.toolsets.abstract import AbstractToolset
+from pydantic_ai_blocking_approval import ApprovalToolset
+
+class MySmartToolset(AbstractToolset):
+    """Inner toolset with custom approval logic."""
 
     SAFE_COMMANDS = {"ls", "pwd", "echo", "date"}
 
     def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
-        # Check pre_approved config first
-        tool_config = self.config.get(name, {})
-        if tool_config.get("pre_approved"):
+        if name == "safe_tool":
             return False
 
         # Custom logic for shell_exec
@@ -207,17 +216,14 @@ class ShellApprovalToolset(ApprovalToolset):
 
         return True  # Default: require approval
 
-# Usage
-toolset = ShellApprovalToolset(
-    inner=shell_toolset,
-    approval_callback=callback,
-    config={
-        "get_cwd": {"pre_approved": True},  # Additional pre-approved tools
-    },
+    # ... other toolset methods ...
+
+# ApprovalToolset delegates to inner.needs_approval()
+approved = ApprovalToolset(
+    inner=MySmartToolset(),
+    approval_callback=my_callback,
 )
 ```
-
-See `tests/test_integration.py` for a complete example with pattern matching for safe commands and dangerous patterns.
 
 ## Session Approval Caching
 
@@ -244,7 +250,8 @@ The cache key is `(tool_name, tool_args)`.
 ### Classes
 
 - `ApprovalMemory` - Session cache for "approve for session"
-- `ApprovalToolset` - Wrapper that intercepts tool calls (subclass for custom logic)
+- `SimpleApprovalToolset` - Config-based approval (for simple inner toolsets)
+- `ApprovalToolset` - Delegating approval (for inner toolsets with `needs_approval()`)
 - `ApprovalController` - Mode-based controller
 
 ## License

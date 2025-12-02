@@ -9,16 +9,18 @@ Key Components:
     - ApprovalRequest: Returned by tools when approval is needed
     - ApprovalDecision: User's decision (approved, remember for session)
     - ApprovalMemory: Session cache for "approve for session" functionality
-    - ApprovalToolset: Wrapper that intercepts tool calls for approval
+    - BaseApprovalToolset: Abstract base class for approval wrappers
+    - SimpleApprovalToolset: Config-based approval (for simple inner toolsets)
+    - ApprovalToolset: Delegates to inner.needs_approval() (for smart toolsets)
     - ApprovalController: Mode-based controller (interactive/approve_all/strict)
 
-Example:
+Example with SimpleApprovalToolset (config-based):
     from pydantic_ai import Agent
     from pydantic_ai_blocking_approval import (
         ApprovalController,
         ApprovalDecision,
         ApprovalRequest,
-        ApprovalToolset,
+        SimpleApprovalToolset,
     )
 
     # Create a callback for interactive approval
@@ -29,9 +31,9 @@ Example:
             return ApprovalDecision(approved=True, remember="session")
         return ApprovalDecision(approved=response.lower() == "y")
 
-    # Wrap your toolset with approval using per-tool config
+    # Wrap your toolset with config-based approval
     controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
-    approved_toolset = ApprovalToolset(
+    approved_toolset = SimpleApprovalToolset(
         inner=my_toolset,
         approval_callback=controller.approval_callback,
         memory=controller.memory,
@@ -44,23 +46,28 @@ Example:
     # Use with PydanticAI agent
     agent = Agent(..., toolsets=[approved_toolset])
 
+Example with ApprovalToolset (delegating):
+    from pydantic_ai_blocking_approval import ApprovalToolset
+
+    class MyToolset(AbstractToolset):
+        def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
+            if name == "safe_tool":
+                return False
+            return {"description": f"Run {name}"}
+
+    approved = ApprovalToolset(inner=MyToolset(), approval_callback=my_callback)
+
 For testing, use approve_all or strict modes:
     controller = ApprovalController(mode="approve_all")  # Auto-approve
     controller = ApprovalController(mode="strict")       # Auto-deny
-
-For custom approval logic, subclass ApprovalToolset and override needs_approval():
-    class MyApprovalToolset(ApprovalToolset):
-        def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
-            # Custom logic here
-            ...
 """
 
 from .controller import ApprovalController
 from .memory import ApprovalMemory
-from .toolset import ApprovalToolset
+from .toolset import ApprovalToolset, BaseApprovalToolset, SimpleApprovalToolset
 from .types import ApprovalDecision, ApprovalRequest
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "ApprovalController",
@@ -68,4 +75,6 @@ __all__ = [
     "ApprovalMemory",
     "ApprovalRequest",
     "ApprovalToolset",
+    "BaseApprovalToolset",
+    "SimpleApprovalToolset",
 ]

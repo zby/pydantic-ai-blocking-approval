@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-12-02
+
+### Added
+
+- `BaseApprovalToolset` - Abstract base class with shared approval machinery
+- `SimpleApprovalToolset` - Config-based approval for simple inner toolsets
+
+### Changed
+
+- **BREAKING**: Split `ApprovalToolset` into three classes:
+  - `BaseApprovalToolset`: Abstract base, subclasses must implement `needs_approval()`
+  - `SimpleApprovalToolset`: Config-based approval (replaces old `ApprovalToolset` default behavior)
+  - `ApprovalToolset`: Delegates to `inner.needs_approval()` for smart inner toolsets
+
+### Migration
+
+Replace `ApprovalToolset` with `SimpleApprovalToolset` for config-based approval:
+```python
+# Old (0.4.0)
+ApprovalToolset(inner=toolset, config={"safe_tool": {"pre_approved": True}})
+
+# New (0.5.0)
+SimpleApprovalToolset(inner=toolset, config={"safe_tool": {"pre_approved": True}})
+```
+
+For inner toolsets that implement `needs_approval()`, use `ApprovalToolset`:
+```python
+# New (0.5.0) - inner toolset has needs_approval()
+class MyToolset(AbstractToolset):
+    def needs_approval(self, name, args):
+        return name != "safe_tool"
+
+ApprovalToolset(inner=MyToolset(), approval_callback=callback)
+```
+
+For custom approval logic, subclass `BaseApprovalToolset`:
+```python
+# Old (0.4.0)
+class MyApprovalToolset(ApprovalToolset):
+    def needs_approval(self, name, tool_args):
+        # custom logic
+
+# New (0.5.0)
+class MyApprovalToolset(BaseApprovalToolset):
+    def needs_approval(self, name, tool_args):
+        # custom logic
+```
+
 ## [0.4.0] - 2025-11-30
 
 ### Removed

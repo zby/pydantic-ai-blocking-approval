@@ -14,7 +14,8 @@ from pydantic_ai_blocking_approval import (
     ApprovalDecision,
     ApprovalMemory,
     ApprovalRequest,
-    ApprovalToolset,
+    BaseApprovalToolset,
+    SimpleApprovalToolset,
 )
 
 
@@ -37,7 +38,7 @@ class TestApprovalIntegration:
         inner_toolset = FunctionToolset([delete_file])
 
         # Wrap with approval (no config = requires approval by default)
-        approved_toolset = ApprovalToolset(
+        approved_toolset = SimpleApprovalToolset(
             inner=inner_toolset,
             approval_callback=deny_callback,
         )
@@ -77,7 +78,7 @@ class TestApprovalIntegration:
             return f"Email sent to {to} with subject: {subject}"
 
         inner_toolset = FunctionToolset([send_email])
-        approved_toolset = ApprovalToolset(
+        approved_toolset = SimpleApprovalToolset(
             inner=inner_toolset,
             approval_callback=approve_callback,
         )
@@ -111,7 +112,7 @@ class TestApprovalIntegration:
             return "Action completed"
 
         inner_toolset = FunctionToolset([dangerous_action])
-        approved_toolset = ApprovalToolset(
+        approved_toolset = SimpleApprovalToolset(
             inner=inner_toolset,
             approval_callback=controller.approval_callback,
             memory=controller.memory,
@@ -141,7 +142,7 @@ class TestApprovalIntegration:
             return f"Wrote to {path}"
 
         inner_toolset = FunctionToolset([write_file])
-        approved_toolset = ApprovalToolset(
+        approved_toolset = SimpleApprovalToolset(
             inner=inner_toolset,
             approval_callback=controller.approval_callback,
             memory=controller.memory,
@@ -177,7 +178,7 @@ class TestApprovalIntegration:
             return f"Processed: {message}"
 
         inner_toolset = FunctionToolset([some_action])
-        approved_toolset = ApprovalToolset(
+        approved_toolset = SimpleApprovalToolset(
             inner=inner_toolset,
             approval_callback=approve_callback,
         )
@@ -214,7 +215,7 @@ class TestApprovalIntegration:
             return f"Processed: {message}"
 
         inner_toolset = FunctionToolset([safe_action])
-        approved_toolset = ApprovalToolset(
+        approved_toolset = SimpleApprovalToolset(
             inner=inner_toolset,
             approval_callback=should_not_be_called,
             config={"safe_action": {"pre_approved": True}},
@@ -238,10 +239,10 @@ class TestApprovalIntegration:
         assert "Processed" in result.output or "hello" in result.output
 
 
-class ShellApprovalToolset(ApprovalToolset):
+class ShellApprovalToolset(BaseApprovalToolset):
     """Example shell command approval toolset with pattern matching.
 
-    Demonstrates how to subclass ApprovalToolset and override needs_approval()
+    Demonstrates how to subclass BaseApprovalToolset and implement needs_approval()
     for custom approval logic based on command patterns.
     """
 
