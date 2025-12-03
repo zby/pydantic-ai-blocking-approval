@@ -73,12 +73,13 @@ ApprovalToolset(
 **Complex case**: A shell executor needs to analyze each command. The inner toolset implements the `SupportsNeedsApproval` protocol:
 ```python
 class ShellToolset(AbstractToolset):
-    def needs_approval(self, name, tool_args):
+    def needs_approval(self, name, tool_args, ctx: RunContext):
         command = tool_args.get("command", "")
         if command.startswith("ls "):
             return False  # Safe
         if "rm " in command:
             return {"description": f"Delete: {command}"}  # Dangerous
+        # Can also use ctx.deps for user-specific logic
         return True
 
     # ... tool implementations ...
@@ -87,7 +88,7 @@ class ShellToolset(AbstractToolset):
 ApprovalToolset(inner=ShellToolset(), approval_callback=callback)
 ```
 
-This keeps approval logic with the toolset that understands its domain, while providing a simple config-based fallback for toolsets that don't need custom logic.
+This keeps approval logic with the toolset that understands its domain, while providing a simple config-based fallback for toolsets that don't need custom logic. The `ctx` parameter provides access to the run context (dependencies, model info, etc.) for user-specific approval decisions.
 
 ### 3. Why "secure by default" (unlisted tools require approval)?
 
