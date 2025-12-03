@@ -260,4 +260,4 @@ Each layer has a single responsibility:
 - No session caching needed
 - Single environment (no mode switching)
 
-The architecture is designed to be adoptable incrementally — start with `ApprovalToolset` + config, add `ApprovalController` when you need modes, implement `SupportsNeedsApproval` in your inner toolset when you need per-call decisions.
+The architecture is designed to be adoptable incrementally — start with `ApprovalToolset` + config, implement `SupportsNeedsApproval` in your inner toolset when you need per-call decisions.
