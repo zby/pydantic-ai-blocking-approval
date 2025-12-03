@@ -83,16 +83,11 @@ The key difference: with blocking, the LLM sees the result of each approved acti
 ## Architecture Overview
 
 ```
-SimpleApprovalToolset (config-based)
+ApprovalToolset (unified wrapper)
     ├── intercepts call_tool()
-    ├── checks config[tool_name]["pre_approved"]
-    ├── consults ApprovalMemory for cached decisions
-    ├── calls approval_callback and BLOCKS until user decides
-    └── proceeds or raises PermissionError
-
-ApprovalToolset (delegating)
-    ├── intercepts call_tool()
-    ├── delegates to inner.needs_approval()
+    ├── auto-detects if inner implements SupportsNeedsApproval
+    │   ├── YES: delegates to inner.needs_approval()
+    │   └── NO: uses config[tool_name]["pre_approved"]
     ├── consults ApprovalMemory for cached decisions
     ├── calls approval_callback and BLOCKS until user decides
     └── proceeds or raises PermissionError
@@ -103,9 +98,7 @@ ApprovalController (manages modes)
     └── strict — auto-deny (safety)
 ```
 
-**Two wrapper options:**
-- `SimpleApprovalToolset`: For simple inner toolsets. Uses config to decide approval (secure by default).
-- `ApprovalToolset`: For smart inner toolsets that implement `needs_approval()`. Delegates the decision.
+**How it works:** `ApprovalToolset` automatically detects whether your inner toolset implements the `SupportsNeedsApproval` protocol. If it does, approval decisions are delegated to `inner.needs_approval()`. Otherwise, it falls back to config-based approval (secure by default).
 
 **Note on async:** The toolset methods are `async` because PydanticAI's `AbstractToolset` interface requires it. The "blocking" refers to the `approval_callback` — a synchronous function that blocks the coroutine until the user decides. So `async def call_tool()` awaits the inner toolset, but the approval prompt in the middle is synchronous and blocking.
 
@@ -123,7 +116,7 @@ from pydantic_ai_blocking_approval import (
     ApprovalController,
     ApprovalDecision,
     ApprovalRequest,
-    SimpleApprovalToolset,
+    ApprovalToolset,
 )
 
 # Create a callback for interactive approval
@@ -136,7 +129,7 @@ def my_approval_callback(request: ApprovalRequest) -> ApprovalDecision:
 
 # Wrap your toolset with approval using per-tool config
 controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
-approved_toolset = SimpleApprovalToolset(
+approved_toolset = ApprovalToolset(
     inner=my_toolset,
     approval_callback=controller.approval_callback,
     memory=controller.memory,
@@ -170,12 +163,12 @@ controller = ApprovalController(mode="strict")
 
 ## Integration Patterns
 
-### Pattern 1: SimpleApprovalToolset (Config-Based)
+### Pattern 1: Config-Based (Simple Inner Toolsets)
 
-Use `SimpleApprovalToolset` for simple inner toolsets. Specify which tools skip approval via the `config` parameter:
+For simple inner toolsets, specify which tools skip approval via the `config` parameter:
 
 ```python
-approved_toolset = SimpleApprovalToolset(
+approved_toolset = ApprovalToolset(
     inner=my_toolset,
     approval_callback=my_approval_callback,
     config={
@@ -189,16 +182,16 @@ approved_toolset = SimpleApprovalToolset(
 
 Tools with `pre_approved: True` skip approval. Tools not in config require approval by default (secure by default).
 
-### Pattern 2: ApprovalToolset (Delegating)
+### Pattern 2: Protocol-Based (Smart Inner Toolsets)
 
-Use `ApprovalToolset` when your inner toolset implements `needs_approval()`:
+For inner toolsets with custom approval logic, implement `SupportsNeedsApproval`:
 
 ```python
 from pydantic_ai.toolsets.abstract import AbstractToolset
-from pydantic_ai_blocking_approval import ApprovalToolset
+from pydantic_ai_blocking_approval import ApprovalToolset, SupportsNeedsApproval
 
 class MySmartToolset(AbstractToolset):
-    """Inner toolset with custom approval logic."""
+    """Inner toolset with custom approval logic (implements SupportsNeedsApproval)."""
 
     SAFE_COMMANDS = {"ls", "pwd", "echo", "date"}
 
@@ -220,7 +213,7 @@ class MySmartToolset(AbstractToolset):
 
     # ... other toolset methods ...
 
-# ApprovalToolset delegates to inner.needs_approval()
+# ApprovalToolset auto-detects needs_approval and delegates to it
 approved = ApprovalToolset(
     inner=MySmartToolset(),
     approval_callback=my_callback,
@@ -248,12 +241,12 @@ The cache key is `(tool_name, tool_args)`.
 
 - `ApprovalRequest` - Request object when approval is needed
 - `ApprovalDecision` - User's decision (approved, note, remember)
+- `SupportsNeedsApproval` - Protocol for toolsets with custom approval logic
 
 ### Classes
 
 - `ApprovalMemory` - Session cache for "approve for session"
-- `SimpleApprovalToolset` - Config-based approval (for simple inner toolsets)
-- `ApprovalToolset` - Delegating approval (for inner toolsets with `needs_approval()`)
+- `ApprovalToolset` - Unified wrapper (auto-detects inner toolset capabilities)
 - `ApprovalController` - Mode-based controller
 
 ## License

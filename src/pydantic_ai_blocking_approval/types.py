@@ -3,12 +3,45 @@
 This module defines the fundamental data types for the blocking approval system:
 - ApprovalRequest: Returned by tools to request approval
 - ApprovalDecision: User's decision about a tool call
+- SupportsNeedsApproval: Protocol for toolsets with custom approval logic
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional  # noqa: F401 - Literal used in ApprovalDecision
+from typing import Any, Literal, Optional, Protocol, runtime_checkable
 
 from pydantic import BaseModel
+
+
+@runtime_checkable
+class SupportsNeedsApproval(Protocol):
+    """Protocol for toolsets that implement custom approval logic.
+
+    Toolsets implementing this protocol can provide fine-grained control
+    over which tool calls need approval based on the tool name and arguments.
+
+    Example:
+        class MyToolset(AbstractToolset):
+            def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
+                if name == "safe_tool":
+                    return False  # No approval needed
+                if name == "dangerous_tool":
+                    return {"description": "Run dangerous operation"}
+                return True  # Default: needs approval
+    """
+
+    def needs_approval(self, name: str, tool_args: dict[str, Any]) -> bool | dict[str, Any]:
+        """Determine if a tool call needs approval.
+
+        Args:
+            name: Tool name being called
+            tool_args: Arguments passed to the tool
+
+        Returns:
+            False: No approval needed, proceed directly
+            True: Approval needed with default description
+            dict: Approval needed with custom description ({"description": "..."})
+        """
+        ...
 
 
 class ApprovalRequest(BaseModel):

@@ -5,52 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2025-12-02
+## [0.5.0] - 2025-12-03
 
 ### Added
 
-- `BaseApprovalToolset` - Abstract base class with shared approval machinery
-- `SimpleApprovalToolset` - Config-based approval for simple inner toolsets
+- `SupportsNeedsApproval` - Protocol for toolsets with custom approval logic
 
 ### Changed
 
-- **BREAKING**: Split `ApprovalToolset` into three classes:
-  - `BaseApprovalToolset`: Abstract base, subclasses must implement `needs_approval()`
-  - `SimpleApprovalToolset`: Config-based approval (replaces old `ApprovalToolset` default behavior)
-  - `ApprovalToolset`: Delegates to `inner.needs_approval()` for smart inner toolsets
+- **BREAKING**: `ApprovalToolset` now auto-detects inner toolset capabilities
+  - If inner implements `SupportsNeedsApproval` protocol: delegates to `inner.needs_approval()`
+  - Otherwise: uses `config` dict for `pre_approved` settings (same as 0.4.0)
+- No API change for config-based usage (most common case)
 
 ### Migration
 
-Replace `ApprovalToolset` with `SimpleApprovalToolset` for config-based approval:
+**Config-based approval** (no change needed):
 ```python
-# Old (0.4.0)
+# Works the same in 0.4.0 and 0.5.0
 ApprovalToolset(inner=toolset, config={"safe_tool": {"pre_approved": True}})
-
-# New (0.5.0)
-SimpleApprovalToolset(inner=toolset, config={"safe_tool": {"pre_approved": True}})
 ```
 
-For inner toolsets that implement `needs_approval()`, use `ApprovalToolset`:
+**Custom approval logic** - implement `SupportsNeedsApproval` on your inner toolset:
 ```python
-# New (0.5.0) - inner toolset has needs_approval()
-class MyToolset(AbstractToolset):
-    def needs_approval(self, name, args):
-        return name != "safe_tool"
-
-ApprovalToolset(inner=MyToolset(), approval_callback=callback)
-```
-
-For custom approval logic, subclass `BaseApprovalToolset`:
-```python
-# Old (0.4.0)
+# Old (0.4.0) - subclass ApprovalToolset
 class MyApprovalToolset(ApprovalToolset):
     def needs_approval(self, name, tool_args):
         # custom logic
 
-# New (0.5.0)
-class MyApprovalToolset(BaseApprovalToolset):
+MyApprovalToolset(inner=BasicToolset(), ...)
+
+# New (0.5.0) - implement protocol on inner toolset
+class MyToolset(AbstractToolset):
     def needs_approval(self, name, tool_args):
-        # custom logic
+        # custom logic (same as before)
+
+ApprovalToolset(inner=MyToolset(), approval_callback=callback)
 ```
 
 ## [0.4.0] - 2025-11-30

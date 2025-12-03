@@ -9,8 +9,8 @@
 This package is experimental. All APIs may change.
 
 **Core components:**
-- `SimpleApprovalToolset` wrapper with `config` dict for per-tool settings
-- `ApprovalToolset` wrapper that delegates to `inner.needs_approval()`
+- `ApprovalToolset` unified wrapper (auto-detects inner toolset capabilities)
+- `SupportsNeedsApproval` protocol for custom approval logic
 - `ApprovalController` with modes (interactive/approve_all/strict)
 - `ApprovalMemory` for session caching
 - `ApprovalDecision` with `remember="session"`
@@ -48,19 +48,21 @@ The architecture addresses each of these concerns through layered abstractions.
 
 This eliminates the coupling and lets the toolset make one decision with all the context.
 
-### 2. Why two wrapper classes?
+### 2. Why a unified wrapper with protocol detection?
 
-These serve different use cases:
+**Previous design**: Two separate wrapper classes (`SimpleApprovalToolset` for config-based, `ApprovalToolset` for delegating).
 
-| Wrapper | Use Case | Example |
-|---------|----------|---------|
-| `SimpleApprovalToolset` | Simple static allowlist via config | `config={"get_time": {"pre_approved": True}}` |
-| `ApprovalToolset` | Dynamic per-call decisions | Inner toolset implements `needs_approval()` |
+**Problem**: Users had to choose the right wrapper, and the distinction was confusing.
 
-**Simple case**: A basic toolset with a few safe read-only tools uses `SimpleApprovalToolset`:
+**Solution**: A single `ApprovalToolset` that auto-detects capabilities:
+- If inner implements `SupportsNeedsApproval` protocol → delegate to `inner.needs_approval()`
+- Otherwise → use config dict for `pre_approved` settings
+
+**Simple case**: A basic toolset with a few safe read-only tools uses config:
 ```python
-SimpleApprovalToolset(
+ApprovalToolset(
     inner=my_toolset,
+    approval_callback=callback,
     config={
         "get_time": {"pre_approved": True},
         "list_files": {"pre_approved": True},
@@ -68,7 +70,7 @@ SimpleApprovalToolset(
 )
 ```
 
-**Complex case**: A shell executor needs to analyze each command. The inner toolset implements `needs_approval()`:
+**Complex case**: A shell executor needs to analyze each command. The inner toolset implements the `SupportsNeedsApproval` protocol:
 ```python
 class ShellToolset(AbstractToolset):
     def needs_approval(self, name, tool_args):
@@ -81,11 +83,11 @@ class ShellToolset(AbstractToolset):
 
     # ... tool implementations ...
 
-# Wrap with ApprovalToolset which delegates to inner.needs_approval()
+# ApprovalToolset auto-detects needs_approval and delegates to it
 ApprovalToolset(inner=ShellToolset(), approval_callback=callback)
 ```
 
-This keeps approval logic with the toolset that understands its domain.
+This keeps approval logic with the toolset that understands its domain, while providing a simple config-based fallback for toolsets that don't need custom logic.
 
 ### 3. Why "secure by default" (unlisted tools require approval)?
 
@@ -219,9 +221,11 @@ This separation keeps the approval library simple and decoupled from UI concerns
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              SimpleApprovalToolset (config-based)           │
+│                ApprovalToolset (unified)                    │
 │  • Wraps any AbstractToolset                                │
-│  • Checks config[name]["pre_approved"]                      │
+│  • Auto-detects SupportsNeedsApproval protocol              │
+│    ├── YES: delegates to inner.needs_approval()             │
+│    └── NO: uses config[name]["pre_approved"]                │
 │  • Builds ApprovalRequest with description                  │
 │  • Consults cache, calls approval_callback, handles decision│
 └─────────────────────────────────────────────────────────────┘
@@ -230,33 +234,16 @@ This separation keeps the approval library simple and decoupled from UI concerns
 ┌─────────────────────────────────────────────────────────────┐
 │                    Inner Toolset                            │
 │  • Implements actual tool logic                             │
-│  • No awareness of approval                                 │
-└─────────────────────────────────────────────────────────────┘
-
---- OR ---
-
-┌─────────────────────────────────────────────────────────────┐
-│                ApprovalToolset (delegating)                 │
-│  • Wraps any AbstractToolset with needs_approval()          │
-│  • Delegates to inner.needs_approval()                      │
-│  • Builds ApprovalRequest with description                  │
-│  • Consults cache, calls approval_callback, handles decision│
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Inner Toolset                            │
-│  • Implements actual tool logic                             │
-│  • Implements needs_approval() for custom approval logic    │
+│  • Optionally implements SupportsNeedsApproval protocol     │
+│    for custom approval logic                                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 Each layer has a single responsibility:
 - **CLI**: User interaction and display
 - **Controller**: Mode-based behavior and session memory
-- **SimpleApprovalToolset**: Config-based approval flow orchestration
-- **ApprovalToolset**: Delegating approval flow orchestration
-- **Inner Toolset**: Domain logic (and optionally approval logic via `needs_approval()`)
+- **ApprovalToolset**: Approval flow orchestration (auto-detects inner capabilities)
+- **Inner Toolset**: Domain logic (and optionally approval logic via `SupportsNeedsApproval`)
 
 ---
 
@@ -273,4 +260,4 @@ Each layer has a single responsibility:
 - No session caching needed
 - Single environment (no mode switching)
 
-The architecture is designed to be adoptable incrementally — start with `SimpleApprovalToolset` + config, add `ApprovalController` when you need modes, switch to `ApprovalToolset` with a smart inner toolset when you need per-call decisions.
+The architecture is designed to be adoptable incrementally — start with `ApprovalToolset` + config, add `ApprovalController` when you need modes, implement `SupportsNeedsApproval` in your inner toolset when you need per-call decisions.

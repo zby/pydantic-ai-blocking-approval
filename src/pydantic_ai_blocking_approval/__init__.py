@@ -9,18 +9,17 @@ Key Components:
     - ApprovalRequest: Returned by tools when approval is needed
     - ApprovalDecision: User's decision (approved, remember for session)
     - ApprovalMemory: Session cache for "approve for session" functionality
-    - BaseApprovalToolset: Abstract base class for approval wrappers
-    - SimpleApprovalToolset: Config-based approval (for simple inner toolsets)
-    - ApprovalToolset: Delegates to inner.needs_approval() (for smart toolsets)
+    - ApprovalToolset: Unified wrapper (auto-detects inner toolset capabilities)
     - ApprovalController: Mode-based controller (interactive/approve_all/strict)
+    - SupportsNeedsApproval: Protocol for toolsets with custom approval logic
 
-Example with SimpleApprovalToolset (config-based):
+Example with config (simple inner toolset):
     from pydantic_ai import Agent
     from pydantic_ai_blocking_approval import (
         ApprovalController,
         ApprovalDecision,
         ApprovalRequest,
-        SimpleApprovalToolset,
+        ApprovalToolset,
     )
 
     # Create a callback for interactive approval
@@ -33,7 +32,7 @@ Example with SimpleApprovalToolset (config-based):
 
     # Wrap your toolset with config-based approval
     controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
-    approved_toolset = SimpleApprovalToolset(
+    approved_toolset = ApprovalToolset(
         inner=my_toolset,
         approval_callback=controller.approval_callback,
         memory=controller.memory,
@@ -46,8 +45,8 @@ Example with SimpleApprovalToolset (config-based):
     # Use with PydanticAI agent
     agent = Agent(..., toolsets=[approved_toolset])
 
-Example with ApprovalToolset (delegating):
-    from pydantic_ai_blocking_approval import ApprovalToolset
+Example with smart inner toolset (implements SupportsNeedsApproval):
+    from pydantic_ai_blocking_approval import ApprovalToolset, SupportsNeedsApproval
 
     class MyToolset(AbstractToolset):
         def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
@@ -55,6 +54,7 @@ Example with ApprovalToolset (delegating):
                 return False
             return {"description": f"Run {name}"}
 
+    # ApprovalToolset auto-detects needs_approval and delegates to it
     approved = ApprovalToolset(inner=MyToolset(), approval_callback=my_callback)
 
 For testing, use approve_all or strict modes:
@@ -64,8 +64,8 @@ For testing, use approve_all or strict modes:
 
 from .controller import ApprovalController
 from .memory import ApprovalMemory
-from .toolset import ApprovalToolset, BaseApprovalToolset, SimpleApprovalToolset
-from .types import ApprovalDecision, ApprovalRequest
+from .toolset import ApprovalToolset
+from .types import ApprovalDecision, ApprovalRequest, SupportsNeedsApproval
 
 __version__ = "0.5.0"
 
@@ -75,6 +75,5 @@ __all__ = [
     "ApprovalMemory",
     "ApprovalRequest",
     "ApprovalToolset",
-    "BaseApprovalToolset",
-    "SimpleApprovalToolset",
+    "SupportsNeedsApproval",
 ]
