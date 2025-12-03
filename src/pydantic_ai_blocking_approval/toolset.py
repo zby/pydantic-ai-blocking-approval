@@ -12,14 +12,20 @@ from pydantic_ai import RunContext
 from pydantic_ai.toolsets import AbstractToolset
 
 from .memory import ApprovalMemory
-from .types import ApprovalDecision, ApprovalRequest, SupportsNeedsApproval
+from .types import (
+    ApprovalDecision,
+    ApprovalRequest,
+    ApprovalResult,
+    SupportsApprovalDescription,
+    SupportsNeedsApproval,
+)
 
 
 class ApprovalToolset(AbstractToolset):
     """Approval wrapper for PydanticAI toolsets.
 
     Intercepts tool calls and prompts for user approval before execution.
-    Automatically detects if the inner toolset implements `needs_approval()`:
+    Automatically detects if the inner toolset implements `SupportsNeedsApproval`:
 
     - If inner implements SupportsNeedsApproval: delegates approval decision to it
     - Otherwise: uses config dict to determine pre-approved tools (secure by default)
@@ -37,11 +43,15 @@ class ApprovalToolset(AbstractToolset):
 
     Example with smart inner toolset:
         class MyToolset(AbstractToolset):
-            def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> bool | dict:
+            def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> ApprovalResult:
+                if name == "forbidden":
+                    return ApprovalResult.blocked("Not allowed")
                 if name == "safe_tool":
-                    return False
-                # Can check ctx.deps for user-specific logic
-                return {"description": f"Run {name}"}
+                    return ApprovalResult.pre_approved()
+                return ApprovalResult.needs_approval()
+
+            def get_approval_description(self, name: str, tool_args: dict, ctx: RunContext) -> str:
+                return f"Execute: {name}"
 
         approved = ApprovalToolset(
             inner=MyToolset(),
@@ -84,32 +94,52 @@ class ApprovalToolset(AbstractToolset):
         """Delegate to inner toolset's get_tools."""
         return await self._inner.get_tools(ctx)
 
-    def needs_approval(
+    def _get_approval_result(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
-    ) -> bool | dict[str, Any]:
-        """Determine if this tool call needs approval.
-
-        If inner toolset implements SupportsNeedsApproval, delegates to it.
-        Otherwise, checks config for pre_approved status.
-
-        Args:
-            name: Tool name being called
-            tool_args: Arguments passed to the tool
-            ctx: PydanticAI run context
-
-        Returns:
-            False: no approval needed
-            True: approval needed with default description
-            dict: approval needed with custom description ({"description": "..."})
-        """
+    ) -> ApprovalResult:
+        """Get approval result from inner toolset or config."""
         if isinstance(self._inner, SupportsNeedsApproval):
             return self._inner.needs_approval(name, tool_args, ctx)
 
-        # Config-based: check for pre_approved
+        # Config-based fallback (secure by default)
         tool_config = self.config.get(name, {})
         if tool_config.get("pre_approved"):
-            return False
-        return True  # Secure by default
+            return ApprovalResult.pre_approved()
+        return ApprovalResult.needs_approval()
+
+    def _get_description(
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
+    ) -> str:
+        """Get description from inner toolset or generate default."""
+        if isinstance(self._inner, SupportsApprovalDescription):
+            return self._inner.get_approval_description(name, tool_args, ctx)
+
+        # Default: "tool_name(arg1=val1, arg2=val2)"
+        args_str = ", ".join(f"{k}={v!r}" for k, v in tool_args.items())
+        return f"{name}({args_str})"
+
+    def _prompt_for_approval(
+        self, name: str, tool_args: dict[str, Any], description: str
+    ) -> None:
+        """Prompt user for approval. Raises PermissionError if denied."""
+        # Check session cache first
+        cached = self._memory.lookup(name, tool_args)
+        if cached is not None and cached.approved:
+            return
+
+        request = ApprovalRequest(
+            tool_name=name,
+            tool_args=tool_args,
+            description=description,
+        )
+        decision = self._approval_callback(request)
+
+        self._memory.store(name, tool_args, decision)
+
+        if not decision.approved:
+            raise PermissionError(
+                f"User denied {name}: {decision.note or 'no reason given'}"
+            )
 
     async def call_tool(
         self,
@@ -118,69 +148,14 @@ class ApprovalToolset(AbstractToolset):
         ctx: RunContext[Any],
         tool: Any,
     ) -> Any:
-        """Intercept tool calls for approval.
+        """Intercept tool calls for approval checking."""
+        result = self._get_approval_result(name, tool_args, ctx)
 
-        Calls needs_approval() to determine if approval is needed, then
-        prompts user if necessary before delegating to inner toolset.
+        if result.is_blocked:
+            raise PermissionError(result.block_reason)
 
-        Args:
-            name: Tool name being called
-            tool_args: Arguments passed to the tool
-            ctx: PydanticAI run context
-            tool: The tool object/function
-
-        Returns:
-            Result from the inner toolset's call_tool
-
-        Raises:
-            PermissionError: If user denies approval
-        """
-        result = self.needs_approval(name, tool_args, ctx)
-
-        if result is not False:
-            custom = result if isinstance(result, dict) else None
-            self._prompt_for_approval(name, tool_args, custom)
+        if result.is_needs_approval:
+            description = self._get_description(name, tool_args, ctx)
+            self._prompt_for_approval(name, tool_args, description)
 
         return await self._inner.call_tool(name, tool_args, ctx, tool)
-
-    def _prompt_for_approval(
-        self,
-        name: str,
-        tool_args: dict[str, Any],
-        custom: Optional[dict[str, Any]] = None,
-    ) -> None:
-        """Prompt user for approval, raising PermissionError if denied.
-
-        Args:
-            name: Tool name
-            tool_args: Tool arguments
-            custom: Optional dict with custom 'description' key
-        """
-        if custom is None:
-            custom = {}
-
-        description = custom.get(
-            "description",
-            f"{name}({', '.join(f'{k}={v!r}' for k, v in tool_args.items())})",
-        )
-
-        # Check session cache first (keyed by tool_name + tool_args)
-        cached = self._memory.lookup(name, tool_args)
-        if cached is not None and cached.approved:
-            return  # Already approved in session
-
-        # Build request and prompt user
-        request = ApprovalRequest(
-            tool_name=name,
-            tool_args=tool_args,
-            description=description,
-        )
-        decision = self._approval_callback(request)
-
-        # Cache the decision
-        self._memory.store(name, tool_args, decision)
-
-        if not decision.approved:
-            raise PermissionError(
-                f"User denied {name}: {decision.note or 'no reason given'}"
-            )

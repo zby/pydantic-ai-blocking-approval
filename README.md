@@ -86,8 +86,12 @@ The key difference: with blocking, the LLM sees the result of each approved acti
 ApprovalToolset (unified wrapper)
     ├── intercepts call_tool()
     ├── auto-detects if inner implements SupportsNeedsApproval
-    │   ├── YES: delegates to inner.needs_approval()
+    │   ├── YES: delegates to inner.needs_approval() → ApprovalResult
     │   └── NO: uses config[tool_name]["pre_approved"]
+    ├── handles ApprovalResult:
+    │   ├── blocked → raises PermissionError
+    │   ├── pre_approved → proceeds without prompting
+    │   └── needs_approval → prompts user
     ├── consults ApprovalMemory for cached decisions
     ├── calls approval_callback and BLOCKS until user decides
     └── proceeds or raises PermissionError
@@ -98,7 +102,7 @@ ApprovalController (manages modes)
     └── strict — auto-deny (safety)
 ```
 
-**How it works:** `ApprovalToolset` automatically detects whether your inner toolset implements the `SupportsNeedsApproval` protocol. If it does, approval decisions are delegated to `inner.needs_approval()`. Otherwise, it falls back to config-based approval (secure by default).
+**How it works:** `ApprovalToolset` automatically detects whether your inner toolset implements the `SupportsNeedsApproval` protocol. If it does, approval decisions are delegated to `inner.needs_approval()` which returns an `ApprovalResult` (blocked, pre_approved, or needs_approval). Otherwise, it falls back to config-based approval (secure by default).
 
 **Note on async:** The toolset methods are `async` because PydanticAI's `AbstractToolset` interface requires it. The "blocking" refers to the `approval_callback` — a synchronous function that blocks the coroutine until the user decides. So `async def call_tool()` awaits the inner toolset, but the approval prompt in the middle is synchronous and blocking.
 
@@ -189,29 +193,40 @@ For inner toolsets with custom approval logic, implement `SupportsNeedsApproval`
 ```python
 from pydantic_ai import RunContext
 from pydantic_ai.toolsets.abstract import AbstractToolset
-from pydantic_ai_blocking_approval import ApprovalToolset, SupportsNeedsApproval
+from pydantic_ai_blocking_approval import ApprovalResult, ApprovalToolset
 
 class MySmartToolset(AbstractToolset):
     """Inner toolset with custom approval logic (implements SupportsNeedsApproval)."""
 
     SAFE_COMMANDS = {"ls", "pwd", "echo", "date"}
+    BLOCKED_COMMANDS = {"rm -rf /", "shutdown"}
 
-    def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> bool | dict:
+    def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> ApprovalResult:
         if name == "safe_tool":
-            return False
+            return ApprovalResult.pre_approved()
 
         # Custom logic for shell_exec
         if name == "shell_exec":
             command = tool_args.get("command", "")
             base_cmd = command.split()[0] if command else ""
 
-            if base_cmd in self.SAFE_COMMANDS:
-                return False  # Safe command
+            # Block dangerous commands entirely
+            if command in self.BLOCKED_COMMANDS:
+                return ApprovalResult.blocked(f"Command '{command}' is forbidden")
 
-            return {"description": f"Execute: {command}"}
+            if base_cmd in self.SAFE_COMMANDS:
+                return ApprovalResult.pre_approved()
+
+            return ApprovalResult.needs_approval()
 
         # Can also use ctx.deps for user-specific approval logic
-        return True  # Default: require approval
+        return ApprovalResult.needs_approval()
+
+    def get_approval_description(self, name: str, tool_args: dict, ctx: RunContext) -> str:
+        """Return human-readable description for approval prompt."""
+        if name == "shell_exec":
+            return f"Execute: {tool_args.get('command', '')}"
+        return f"{name}({tool_args})"
 
     # ... other toolset methods ...
 
@@ -241,9 +256,11 @@ The cache key is `(tool_name, tool_args)`.
 
 ### Types
 
+- `ApprovalResult` - Structured result from approval checking (blocked/pre_approved/needs_approval)
 - `ApprovalRequest` - Request object when approval is needed
 - `ApprovalDecision` - User's decision (approved, note, remember)
 - `SupportsNeedsApproval` - Protocol for toolsets with custom approval logic
+- `SupportsApprovalDescription` - Protocol for custom approval descriptions
 
 ### Classes
 

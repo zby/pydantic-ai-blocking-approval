@@ -10,7 +10,9 @@ This package is experimental. All APIs may change.
 
 **Core components:**
 - `ApprovalToolset` unified wrapper (auto-detects inner toolset capabilities)
+- `ApprovalResult` structured type (blocked/pre_approved/needs_approval)
 - `SupportsNeedsApproval` protocol for custom approval logic
+- `SupportsApprovalDescription` protocol for custom descriptions
 - `ApprovalController` with modes (interactive/approve_all/strict)
 - `ApprovalMemory` for session caching
 - `ApprovalDecision` with `remember="session"`
@@ -33,20 +35,27 @@ The architecture addresses each of these concerns through layered abstractions.
 
 ## Design Decisions Explained
 
-### 1. Why `needs_approval()` returns `bool | dict`?
+### 1. Why `ApprovalResult` instead of `bool | dict`?
 
-**Single-return-type alternative**: Two separate methods (`needs_approval() -> bool` and `present_for_approval() -> dict`).
-
-**Problem**: Duplicate computation. A shell toolset checking if `rm -rf /` is dangerous would:
-1. Parse the command in `needs_approval()` to return `True`
-2. Parse it again in `present_for_approval()` to build the warning message
-
-**Solution**: One method that returns:
+**Previous design**: `needs_approval()` returned `bool | dict`:
 - `False` — no approval needed
-- `True` — approval needed, use default presentation
-- `dict` — approval needed, here's the custom presentation I already computed
+- `True` — approval needed with default presentation
+- `dict` — approval needed with custom description
 
-This eliminates the coupling and lets the toolset make one decision with all the context.
+**Problems**:
+1. **Conflated concerns**: Authorization (blocked), approval requirement, and description generation were mixed
+2. **Awkward semantics**: `False` means "pre-approved", which is confusing
+3. **No explicit blocking**: Blocked operations required raising exceptions inside `needs_approval()`
+
+**Solution**: Structured `ApprovalResult` type with three explicit states:
+- `ApprovalResult.blocked(reason)` — operation forbidden by policy
+- `ApprovalResult.pre_approved()` — no user prompt needed
+- `ApprovalResult.needs_approval()` — requires user approval
+
+Description generation is now a separate protocol (`SupportsApprovalDescription`), called only when `needs_approval` status is returned. This separation:
+- Makes each state explicit and self-documenting
+- Allows blocking without exceptions in the protocol method
+- Separates the "should we ask?" decision from "what do we show?"
 
 ### 2. Why a unified wrapper with protocol detection?
 
@@ -73,14 +82,21 @@ ApprovalToolset(
 **Complex case**: A shell executor needs to analyze each command. The inner toolset implements the `SupportsNeedsApproval` protocol:
 ```python
 class ShellToolset(AbstractToolset):
-    def needs_approval(self, name, tool_args, ctx: RunContext):
+    def needs_approval(self, name, tool_args, ctx: RunContext) -> ApprovalResult:
         command = tool_args.get("command", "")
+        if command == "rm -rf /":
+            return ApprovalResult.blocked("Catastrophic command forbidden")
         if command.startswith("ls "):
-            return False  # Safe
+            return ApprovalResult.pre_approved()
         if "rm " in command:
-            return {"description": f"Delete: {command}"}  # Dangerous
-        # Can also use ctx.deps for user-specific logic
-        return True
+            return ApprovalResult.needs_approval()
+        return ApprovalResult.needs_approval()
+
+    def get_approval_description(self, name, tool_args, ctx: RunContext) -> str:
+        command = tool_args.get("command", "")
+        if "rm " in command:
+            return f"Delete: {command}"
+        return f"Execute: {command}"
 
     # ... tool implementations ...
 
@@ -177,7 +193,7 @@ This architecture supports the [CLI Approval User Stories](cli_approval_user_sto
 | 7. Strict mode | ✅ | `ApprovalController(mode="strict")` |
 | 8. Shell command approval | ✅ | Any tool can require approval |
 | 9. Pattern-based pre-approval | ✅ | Inner toolset implements `needs_approval()` |
-| 10. Block dangerous commands | ✅ | `needs_approval()` returns `True`, callback denies, raises `PermissionError` |
+| 10. Block dangerous commands | ✅ | `needs_approval()` returns `ApprovalResult.blocked()`, raises `PermissionError` |
 | 11-13. Worker/delegation approval | ✅ | Generic — any tool type works |
 | 14. See approval history | ✅ | `ApprovalMemory.list_approvals()` |
 | 15-18. Rich presentation | ⚠️ | CLI responsibility (see note below) |
@@ -227,7 +243,10 @@ This separation keeps the approval library simple and decoupled from UI concerns
 │  • Auto-detects SupportsNeedsApproval protocol              │
 │    ├── YES: delegates to inner.needs_approval()             │
 │    └── NO: uses config[name]["pre_approved"]                │
-│  • Builds ApprovalRequest with description                  │
+│  • Handles ApprovalResult:                                  │
+│    ├── blocked → raises PermissionError                     │
+│    ├── pre_approved → proceeds without prompting            │
+│    └── needs_approval → gets description, prompts user      │
 │  • Consults cache, calls approval_callback, handles decision│
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -236,7 +255,9 @@ This separation keeps the approval library simple and decoupled from UI concerns
 │                    Inner Toolset                            │
 │  • Implements actual tool logic                             │
 │  • Optionally implements SupportsNeedsApproval protocol     │
-│    for custom approval logic                                │
+│    for custom approval logic (returns ApprovalResult)       │
+│  • Optionally implements SupportsApprovalDescription        │
+│    for custom descriptions                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -244,7 +265,7 @@ Each layer has a single responsibility:
 - **CLI**: User interaction and display
 - **Controller**: Mode-based behavior and session memory
 - **ApprovalToolset**: Approval flow orchestration (auto-detects inner capabilities)
-- **Inner Toolset**: Domain logic (and optionally approval logic via `SupportsNeedsApproval`)
+- **Inner Toolset**: Domain logic (and optionally approval logic via `SupportsNeedsApproval` and `SupportsApprovalDescription`)
 
 ---
 

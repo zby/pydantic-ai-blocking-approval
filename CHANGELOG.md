@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-12-03
+
+### Added
+
+- `ApprovalResult` - Structured result type for approval checking with three states:
+  - `ApprovalResult.blocked(reason)` - Operation forbidden by policy
+  - `ApprovalResult.pre_approved()` - No user prompt needed
+  - `ApprovalResult.needs_approval()` - Requires user approval
+- `SupportsApprovalDescription` - Protocol for toolsets that provide custom approval descriptions
+- Blocked operations now raise `PermissionError` with the block reason
+
+### Changed
+
+- **BREAKING**: `SupportsNeedsApproval.needs_approval()` now returns `ApprovalResult` instead of `bool | dict`
+  - Clearer semantics: three explicit states instead of overloaded return types
+  - Blocked operations are now part of the return type, not exceptions
+- **BREAKING**: Description generation is now a separate protocol (`SupportsApprovalDescription`)
+  - `get_approval_description(name, tool_args, ctx)` returns the description string
+  - If not implemented, `ApprovalToolset` generates a default description
+- Internal refactoring of `ApprovalToolset`:
+  - `_get_approval_result()` - Get approval status from inner toolset or config
+  - `_get_description()` - Get description from inner toolset or generate default
+
+### Migration
+
+**Config-based approval** (no change needed):
+```python
+# Works the same as before
+ApprovalToolset(inner=toolset, config={"safe_tool": {"pre_approved": True}})
+```
+
+**Custom approval logic** - update return types:
+```python
+# Old (0.5.0)
+class MyToolset(AbstractToolset):
+    def needs_approval(self, name, tool_args, ctx: RunContext) -> bool | dict:
+        if blocked:
+            raise PermissionError("reason")
+        if safe:
+            return False
+        return {"description": "Execute command"}
+
+# New (0.7.0)
+class MyToolset(AbstractToolset):
+    def needs_approval(self, name, tool_args, ctx: RunContext) -> ApprovalResult:
+        if blocked:
+            return ApprovalResult.blocked("reason")
+        if safe:
+            return ApprovalResult.pre_approved()
+        return ApprovalResult.needs_approval()
+
+    def get_approval_description(self, name, tool_args, ctx: RunContext) -> str:
+        return "Execute command"
+```
+
 ## [0.5.0] - 2025-12-03
 
 ### Added

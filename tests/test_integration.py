@@ -14,6 +14,7 @@ from pydantic_ai_blocking_approval import (
     ApprovalDecision,
     ApprovalMemory,
     ApprovalRequest,
+    ApprovalResult,
     ApprovalToolset,
 )
 
@@ -271,6 +272,7 @@ class ShellToolset(AbstractToolset):
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self._executed_commands: list[str] = []
         self.config = config or {}
+        self._last_description: str | None = None
 
     @property
     def id(self) -> str | None:
@@ -303,7 +305,7 @@ class ShellToolset(AbstractToolset):
 
     def needs_approval(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any] | None = None
-    ) -> bool | dict[str, Any]:
+    ) -> ApprovalResult:
         """Decide if shell command needs approval based on patterns.
 
         Implements SupportsNeedsApproval protocol.
@@ -314,19 +316,20 @@ class ShellToolset(AbstractToolset):
 
         # Check pre_approved first
         if tool_config.get("pre_approved"):
-            return False
+            return ApprovalResult.pre_approved()
 
         if name != "shell_exec":
-            return True  # Unknown tools require approval
+            return ApprovalResult.needs_approval()
 
         command = tool_args.get("command", "")
 
         # Check for dangerous patterns first (highest priority)
         for pattern in self.DANGEROUS_PATTERNS:
             if re.search(pattern, command):
-                return {
-                    "description": f"Execute potentially dangerous command: {command}",
-                }
+                self._last_description = (
+                    f"Execute potentially dangerous command: {command}"
+                )
+                return ApprovalResult.needs_approval()
 
         # Check if it's a safe command
         base_command = command.split()[0] if command.split() else ""
@@ -337,67 +340,77 @@ class ShellToolset(AbstractToolset):
                 path = command.split()[1]
                 safe_paths = tool_config.get("safe_read_paths", self.SAFE_READ_PATHS)
                 if not any(path.startswith(safe) for safe in safe_paths):
-                    return {
-                        "description": f"Read file outside safe paths: {path}",
-                    }
-            return False  # Safe command, no approval needed
+                    self._last_description = f"Read file outside safe paths: {path}"
+                    return ApprovalResult.needs_approval()
+            return ApprovalResult.pre_approved()
 
         # Unknown command - require approval
-        return {
-            "description": f"Execute command: {command}",
-        }
+        self._last_description = f"Execute command: {command}"
+        return ApprovalResult.needs_approval()
+
+    def get_approval_description(
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any] | None = None
+    ) -> str:
+        """Return description for approval prompt."""
+        if self._last_description:
+            return self._last_description
+        command = tool_args.get("command", "")
+        return f"Execute: {command}"
 
 
 class TestShellToolsetWithApproval:
     """Tests for ShellToolset with SupportsNeedsApproval and ApprovalToolset wrapper."""
 
     def test_needs_approval_safe_commands(self):
-        """Test that safe commands return False from needs_approval."""
+        """Test that safe commands return pre_approved from needs_approval."""
         toolset = ShellToolset()
 
-        # Safe commands should return False
-        assert toolset.needs_approval("shell_exec", {"command": "ls -la"}) is False
-        assert toolset.needs_approval("shell_exec", {"command": "pwd"}) is False
-        assert toolset.needs_approval("shell_exec", {"command": "whoami"}) is False
-        assert toolset.needs_approval("shell_exec", {"command": "date"}) is False
-        assert toolset.needs_approval("shell_exec", {"command": "echo hello"}) is False
+        # Safe commands should return pre_approved
+        assert toolset.needs_approval("shell_exec", {"command": "ls -la"}).is_pre_approved
+        assert toolset.needs_approval("shell_exec", {"command": "pwd"}).is_pre_approved
+        assert toolset.needs_approval("shell_exec", {"command": "whoami"}).is_pre_approved
+        assert toolset.needs_approval("shell_exec", {"command": "date"}).is_pre_approved
+        assert toolset.needs_approval("shell_exec", {"command": "echo hello"}).is_pre_approved
 
     def test_needs_approval_dangerous_patterns(self):
-        """Test that dangerous patterns return dict with custom description."""
+        """Test that dangerous patterns return needs_approval with custom description."""
         toolset = ShellToolset()
 
         # rm command
         result = toolset.needs_approval("shell_exec", {"command": "rm -rf /tmp/files"})
-        assert isinstance(result, dict)
-        assert "dangerous" in result["description"].lower()
-        assert "rm -rf /tmp/files" in result["description"]
+        assert result.is_needs_approval
+        desc = toolset.get_approval_description("shell_exec", {"command": "rm -rf /tmp/files"})
+        assert "dangerous" in desc.lower()
+        assert "rm -rf /tmp/files" in desc
 
         # sudo command
         result = toolset.needs_approval("shell_exec", {"command": "sudo apt update"})
-        assert isinstance(result, dict)
-        assert "dangerous" in result["description"].lower()
+        assert result.is_needs_approval
+        desc = toolset.get_approval_description("shell_exec", {"command": "sudo apt update"})
+        assert "dangerous" in desc.lower()
 
         # pipe
         result = toolset.needs_approval("shell_exec", {"command": "ls | grep foo"})
-        assert isinstance(result, dict)
-        assert "dangerous" in result["description"].lower()
+        assert result.is_needs_approval
+        desc = toolset.get_approval_description("shell_exec", {"command": "ls | grep foo"})
+        assert "dangerous" in desc.lower()
 
         # redirect
         result = toolset.needs_approval("shell_exec", {"command": "echo x > file"})
-        assert isinstance(result, dict)
+        assert result.is_needs_approval
 
         # command substitution
         result = toolset.needs_approval("shell_exec", {"command": "echo $(whoami)"})
-        assert isinstance(result, dict)
+        assert result.is_needs_approval
 
     def test_needs_approval_cat_safe_paths(self):
         """Test that cat on safe paths doesn't require approval."""
         toolset = ShellToolset()
 
         # Safe paths
-        assert toolset.needs_approval("shell_exec", {"command": "cat /tmp/test.log"}) is False
-        assert toolset.needs_approval("shell_exec", {"command": "cat /var/log/syslog"}) is False
-        assert toolset.needs_approval("shell_exec", {"command": "cat ./local.txt"}) is False
+        assert toolset.needs_approval("shell_exec", {"command": "cat /tmp/test.log"}).is_pre_approved
+        assert toolset.needs_approval("shell_exec", {"command": "cat /var/log/syslog"}).is_pre_approved
+        assert toolset.needs_approval("shell_exec", {"command": "cat ./local.txt"}).is_pre_approved
 
     def test_needs_approval_cat_unsafe_paths(self):
         """Test that cat on sensitive paths requires approval."""
@@ -405,19 +418,21 @@ class TestShellToolsetWithApproval:
 
         # Unsafe paths
         result = toolset.needs_approval("shell_exec", {"command": "cat /etc/passwd"})
-        assert isinstance(result, dict)
-        assert "/etc/passwd" in result["description"]
+        assert result.is_needs_approval
+        desc = toolset.get_approval_description("shell_exec", {"command": "cat /etc/passwd"})
+        assert "/etc/passwd" in desc
 
         result = toolset.needs_approval("shell_exec", {"command": "cat /home/user/.ssh/id_rsa"})
-        assert isinstance(result, dict)
+        assert result.is_needs_approval
 
     def test_needs_approval_unknown_commands(self):
         """Test that unknown commands require approval with description."""
         toolset = ShellToolset()
 
         result = toolset.needs_approval("shell_exec", {"command": "mycustomtool --flag"})
-        assert isinstance(result, dict)
-        assert "mycustomtool" in result["description"]
+        assert result.is_needs_approval
+        desc = toolset.get_approval_description("shell_exec", {"command": "mycustomtool --flag"})
+        assert "mycustomtool" in desc
 
     def test_approval_toolset_skips_safe_command(self):
         """Test ApprovalToolset with ShellToolset skips approval for safe commands."""
@@ -555,9 +570,9 @@ class TestShellToolsetWithApproval:
         """Test that unknown tools require approval."""
         toolset = ShellToolset()
 
-        # Unknown tool should return True (require approval)
+        # Unknown tool should return needs_approval
         result = toolset.needs_approval("unknown_tool", {"arg": "value"})
-        assert result is True
+        assert result.is_needs_approval
 
     def test_config_overrides_defaults(self):
         """Test that config can override default safe commands."""
@@ -570,8 +585,119 @@ class TestShellToolsetWithApproval:
         )
 
         # ls should still be safe
-        assert toolset.needs_approval("shell_exec", {"command": "ls -la"}) is False
+        assert toolset.needs_approval("shell_exec", {"command": "ls -la"}).is_pre_approved
 
         # pwd is no longer in safe_commands, so requires approval
         result = toolset.needs_approval("shell_exec", {"command": "pwd"})
-        assert isinstance(result, dict)  # Requires approval
+        assert result.is_needs_approval
+
+
+class BlockingToolset(AbstractToolset):
+    """Toolset that blocks certain operations."""
+
+    def __init__(self) -> None:
+        pass
+
+    @property
+    def id(self) -> str | None:
+        return "blocking_toolset"
+
+    async def get_tools(self, ctx: Any) -> dict:
+        return {
+            "do_action": {
+                "description": "Do an action",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        }
+
+    async def call_tool(
+        self, name: str, tool_args: dict[str, Any], ctx: Any, tool: Any
+    ) -> str:
+        return f"Action: {name}"
+
+    def needs_approval(
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any] | None = None
+    ) -> ApprovalResult:
+        if tool_args.get("blocked"):
+            return ApprovalResult.blocked("This operation is forbidden")
+        if tool_args.get("safe"):
+            return ApprovalResult.pre_approved()
+        return ApprovalResult.needs_approval()
+
+
+class TestBlockedOperations:
+    """Tests for blocked operations."""
+
+    def test_blocked_raises_permission_error(self):
+        """Test that blocked operations raise PermissionError."""
+        toolset = BlockingToolset()
+        approved_toolset = ApprovalToolset(
+            inner=toolset,
+            approval_callback=lambda req: ApprovalDecision(approved=True),
+        )
+
+        with pytest.raises(PermissionError) as exc_info:
+            asyncio.run(
+                approved_toolset.call_tool(
+                    "do_action",
+                    {"blocked": True},
+                    ctx=None,
+                    tool=None,
+                )
+            )
+
+        assert "forbidden" in str(exc_info.value)
+
+    def test_blocked_never_calls_callback(self):
+        """Test that blocked operations never call the approval callback."""
+        callback_called = False
+
+        def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
+            nonlocal callback_called
+            callback_called = True
+            return ApprovalDecision(approved=True)
+
+        toolset = BlockingToolset()
+        approved_toolset = ApprovalToolset(
+            inner=toolset,
+            approval_callback=should_not_be_called,
+        )
+
+        with pytest.raises(PermissionError):
+            asyncio.run(
+                approved_toolset.call_tool(
+                    "do_action",
+                    {"blocked": True},
+                    ctx=None,
+                    tool=None,
+                )
+            )
+
+        assert not callback_called
+
+    def test_pre_approved_skips_callback(self):
+        """Test that pre_approved operations skip the callback."""
+        callback_called = False
+
+        def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
+            nonlocal callback_called
+            callback_called = True
+            return ApprovalDecision(approved=True)
+
+        toolset = BlockingToolset()
+        approved_toolset = ApprovalToolset(
+            inner=toolset,
+            approval_callback=should_not_be_called,
+        )
+
+        result = asyncio.run(
+            approved_toolset.call_tool(
+                "do_action",
+                {"safe": True},
+                ctx=None,
+                tool=None,
+            )
+        )
+
+        assert not callback_called
+        assert "Action" in result
