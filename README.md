@@ -187,6 +187,7 @@ Tools with `pre_approved: True` skip approval. Tools not in config require appro
 For inner toolsets with custom approval logic, implement `SupportsNeedsApproval`:
 
 ```python
+from pydantic_ai import RunContext
 from pydantic_ai.toolsets.abstract import AbstractToolset
 from pydantic_ai_blocking_approval import ApprovalToolset, SupportsNeedsApproval
 
@@ -195,7 +196,7 @@ class MySmartToolset(AbstractToolset):
 
     SAFE_COMMANDS = {"ls", "pwd", "echo", "date"}
 
-    def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
+    def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> bool | dict:
         if name == "safe_tool":
             return False
 
@@ -209,6 +210,7 @@ class MySmartToolset(AbstractToolset):
 
             return {"description": f"Execute: {command}"}
 
+        # Can also use ctx.deps for user-specific approval logic
         return True  # Default: require approval
 
     # ... other toolset methods ...

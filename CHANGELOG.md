@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: `ApprovalToolset` now auto-detects inner toolset capabilities
   - If inner implements `SupportsNeedsApproval` protocol: delegates to `inner.needs_approval()`
   - Otherwise: uses `config` dict for `pre_approved` settings (same as 0.4.0)
+- **BREAKING**: `SupportsNeedsApproval.needs_approval()` now receives `ctx: RunContext` as third parameter
+  - Allows approval decisions based on run context (dependencies, user data, etc.)
 - No API change for config-based usage (most common case)
 
 ### Migration
@@ -35,10 +37,10 @@ class MyApprovalToolset(ApprovalToolset):
 
 MyApprovalToolset(inner=BasicToolset(), ...)
 
-# New (0.5.0) - implement protocol on inner toolset
+# New (0.5.0) - implement protocol on inner toolset with ctx parameter
 class MyToolset(AbstractToolset):
-    def needs_approval(self, name, tool_args):
-        # custom logic (same as before)
+    def needs_approval(self, name, tool_args, ctx: RunContext):
+        # custom logic, can use ctx.deps for user-specific decisions
 
 ApprovalToolset(inner=MyToolset(), approval_callback=callback)
 ```

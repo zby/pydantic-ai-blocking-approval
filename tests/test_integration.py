@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 import pytest
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.toolsets.abstract import AbstractToolset
@@ -16,6 +16,10 @@ from pydantic_ai_blocking_approval import (
     ApprovalRequest,
     ApprovalToolset,
 )
+
+
+# Mock context for testing needs_approval directly
+MOCK_CTX: Any = None  # Tests that call needs_approval directly can pass None
 
 
 class TestApprovalIntegration:
@@ -297,11 +301,15 @@ class ShellToolset(AbstractToolset):
             return f"Executed: {command}"
         raise ValueError(f"Unknown tool: {name}")
 
-    def needs_approval(self, name: str, tool_args: dict[str, Any]) -> bool | dict[str, Any]:
+    def needs_approval(
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any] | None = None
+    ) -> bool | dict[str, Any]:
         """Decide if shell command needs approval based on patterns.
 
         Implements SupportsNeedsApproval protocol.
+        ctx can be None for testing purposes.
         """
+        # ctx is available for user-specific logic (e.g., ctx.deps)
         tool_config = self.config.get(name, {})
 
         # Check pre_approved first

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Literal, Optional, Protocol, runtime_checkable
 
 from pydantic import BaseModel
+from pydantic_ai import RunContext
 
 
 @runtime_checkable
@@ -17,24 +18,29 @@ class SupportsNeedsApproval(Protocol):
     """Protocol for toolsets that implement custom approval logic.
 
     Toolsets implementing this protocol can provide fine-grained control
-    over which tool calls need approval based on the tool name and arguments.
+    over which tool calls need approval based on the tool name, arguments,
+    and run context (including dependencies).
 
     Example:
         class MyToolset(AbstractToolset):
-            def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
+            def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> bool | dict:
                 if name == "safe_tool":
                     return False  # No approval needed
                 if name == "dangerous_tool":
                     return {"description": "Run dangerous operation"}
+                # Can also check ctx.deps for user-specific logic
                 return True  # Default: needs approval
     """
 
-    def needs_approval(self, name: str, tool_args: dict[str, Any]) -> bool | dict[str, Any]:
+    def needs_approval(
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
+    ) -> bool | dict[str, Any]:
         """Determine if a tool call needs approval.
 
         Args:
             name: Tool name being called
             tool_args: Arguments passed to the tool
+            ctx: PydanticAI run context (includes deps, model, usage, etc.)
 
         Returns:
             False: No approval needed, proceed directly

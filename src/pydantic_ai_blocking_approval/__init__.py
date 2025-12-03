@@ -46,12 +46,14 @@ Example with config (simple inner toolset):
     agent = Agent(..., toolsets=[approved_toolset])
 
 Example with smart inner toolset (implements SupportsNeedsApproval):
+    from pydantic_ai import RunContext
     from pydantic_ai_blocking_approval import ApprovalToolset, SupportsNeedsApproval
 
     class MyToolset(AbstractToolset):
-        def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
+        def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> bool | dict:
             if name == "safe_tool":
                 return False
+            # Can check ctx.deps for user-specific logic
             return {"description": f"Run {name}"}
 
     # ApprovalToolset auto-detects needs_approval and delegates to it

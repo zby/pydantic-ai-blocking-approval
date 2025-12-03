@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from pydantic_ai import RunContext
 from pydantic_ai.toolsets import AbstractToolset
 
 from .memory import ApprovalMemory
@@ -36,9 +37,10 @@ class ApprovalToolset(AbstractToolset):
 
     Example with smart inner toolset:
         class MyToolset(AbstractToolset):
-            def needs_approval(self, name: str, tool_args: dict) -> bool | dict:
+            def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> bool | dict:
                 if name == "safe_tool":
                     return False
+                # Can check ctx.deps for user-specific logic
                 return {"description": f"Run {name}"}
 
         approved = ApprovalToolset(
@@ -82,7 +84,9 @@ class ApprovalToolset(AbstractToolset):
         """Delegate to inner toolset's get_tools."""
         return await self._inner.get_tools(ctx)
 
-    def needs_approval(self, name: str, tool_args: dict[str, Any]) -> bool | dict[str, Any]:
+    def needs_approval(
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
+    ) -> bool | dict[str, Any]:
         """Determine if this tool call needs approval.
 
         If inner toolset implements SupportsNeedsApproval, delegates to it.
@@ -91,6 +95,7 @@ class ApprovalToolset(AbstractToolset):
         Args:
             name: Tool name being called
             tool_args: Arguments passed to the tool
+            ctx: PydanticAI run context
 
         Returns:
             False: no approval needed
@@ -98,7 +103,7 @@ class ApprovalToolset(AbstractToolset):
             dict: approval needed with custom description ({"description": "..."})
         """
         if isinstance(self._inner, SupportsNeedsApproval):
-            return self._inner.needs_approval(name, tool_args)
+            return self._inner.needs_approval(name, tool_args, ctx)
 
         # Config-based: check for pre_approved
         tool_config = self.config.get(name, {})
@@ -110,7 +115,7 @@ class ApprovalToolset(AbstractToolset):
         self,
         name: str,
         tool_args: dict[str, Any],
-        ctx: Any,
+        ctx: RunContext[Any],
         tool: Any,
     ) -> Any:
         """Intercept tool calls for approval.
@@ -130,7 +135,7 @@ class ApprovalToolset(AbstractToolset):
         Raises:
             PermissionError: If user denies approval
         """
-        result = self.needs_approval(name, tool_args)
+        result = self.needs_approval(name, tool_args, ctx)
 
         if result is not False:
             custom = result if isinstance(result, dict) else None
