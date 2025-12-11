@@ -6,13 +6,15 @@ implements SupportsNeedsApproval protocol and delegates accordingly.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+import asyncio
+from typing import Any, Optional
 
 from pydantic_ai import RunContext
 from pydantic_ai.toolsets import AbstractToolset
 
 from .memory import ApprovalMemory
 from .types import (
+    ApprovalCallback,
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
@@ -62,7 +64,7 @@ class ApprovalToolset(AbstractToolset):
     def __init__(
         self,
         inner: AbstractToolset,
-        approval_callback: Callable[[ApprovalRequest], ApprovalDecision],
+        approval_callback: ApprovalCallback,
         memory: Optional[ApprovalMemory] = None,
         config: Optional[dict[str, dict[str, Any]]] = None,
     ):
@@ -70,7 +72,9 @@ class ApprovalToolset(AbstractToolset):
 
         Args:
             inner: The toolset to wrap (must implement AbstractToolset)
-            approval_callback: Callback to request user approval (blocks until decision)
+            approval_callback: Callback to request user approval. Can be sync or async.
+                Sync callbacks block until decision is made.
+                Async callbacks can await external approval (e.g., from web UI).
             memory: Session cache for "approve for session" (created if None)
             config: Per-tool configuration dict. Each key is a tool name, value is
                 a dict with optional "pre_approved": True to skip approval.
@@ -118,10 +122,14 @@ class ApprovalToolset(AbstractToolset):
         args_str = ", ".join(f"{k}={v!r}" for k, v in tool_args.items())
         return f"{name}({args_str})"
 
-    def _prompt_for_approval(
+    async def _prompt_for_approval(
         self, name: str, tool_args: dict[str, Any], description: str
     ) -> None:
-        """Prompt user for approval. Raises PermissionError if denied."""
+        """Prompt user for approval. Raises PermissionError if denied.
+
+        Supports both sync and async approval callbacks. Sync callbacks are
+        called directly; async callbacks are awaited.
+        """
         # Check session cache first
         cached = self._memory.lookup(name, tool_args)
         if cached is not None and cached.approved:
@@ -132,7 +140,12 @@ class ApprovalToolset(AbstractToolset):
             tool_args=tool_args,
             description=description,
         )
-        decision = self._approval_callback(request)
+
+        # Handle both sync and async callbacks
+        if asyncio.iscoroutinefunction(self._approval_callback):
+            decision = await self._approval_callback(request)
+        else:
+            decision = self._approval_callback(request)
 
         self._memory.store(name, tool_args, decision)
 
@@ -156,6 +169,6 @@ class ApprovalToolset(AbstractToolset):
 
         if result.is_needs_approval:
             description = self._get_description(name, tool_args, ctx)
-            self._prompt_for_approval(name, tool_args, description)
+            await self._prompt_for_approval(name, tool_args, description)
 
         return await self._inner.call_tool(name, tool_args, ctx, tool)

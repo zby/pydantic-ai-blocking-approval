@@ -701,3 +701,214 @@ class TestBlockedOperations:
 
         assert not callback_called
         assert "Action" in result
+
+
+class TestAsyncCallbacks:
+    """Tests for async approval callbacks (for web UI, Slack, etc.)."""
+
+    def test_async_callback_approved(self):
+        """Test that async callbacks work for approval."""
+        approval_requests: list[ApprovalRequest] = []
+
+        async def async_approve_callback(request: ApprovalRequest) -> ApprovalDecision:
+            # Simulate async operation (e.g., sending to Slack, waiting for response)
+            await asyncio.sleep(0.01)
+            approval_requests.append(request)
+            return ApprovalDecision(approved=True)
+
+        def send_email(to: str, subject: str) -> str:
+            """Send an email."""
+            return f"Email sent to {to} with subject: {subject}"
+
+        inner_toolset = FunctionToolset([send_email])
+        approved_toolset = ApprovalToolset(
+            inner=inner_toolset,
+            approval_callback=async_approve_callback,
+        )
+
+        agent = Agent(
+            model=TestModel(),
+            toolsets=[approved_toolset],
+        )
+
+        result = asyncio.run(
+            agent.run(
+                "Send email to test@example.com about Meeting",
+                model=TestModel(call_tools=["send_email"]),
+            )
+        )
+
+        assert len(approval_requests) == 1
+        assert approval_requests[0].tool_name == "send_email"
+
+    def test_async_callback_denied(self):
+        """Test that async callbacks can deny operations."""
+        async def async_deny_callback(request: ApprovalRequest) -> ApprovalDecision:
+            await asyncio.sleep(0.01)
+            return ApprovalDecision(approved=False, note="Denied by async callback")
+
+        def delete_file(path: str) -> str:
+            """Delete a file."""
+            return f"Deleted {path}"
+
+        inner_toolset = FunctionToolset([delete_file])
+        approved_toolset = ApprovalToolset(
+            inner=inner_toolset,
+            approval_callback=async_deny_callback,
+        )
+
+        agent = Agent(
+            model=TestModel(),
+            toolsets=[approved_toolset],
+        )
+
+        with pytest.raises(PermissionError) as exc_info:
+            asyncio.run(
+                agent.run(
+                    "Delete /tmp/test.txt",
+                    model=TestModel(call_tools=["delete_file"]),
+                )
+            )
+
+        assert "Denied by async callback" in str(exc_info.value)
+
+    def test_async_callback_with_session_cache(self):
+        """Test that async callbacks work with session caching."""
+        callback_count = 0
+
+        async def async_approve_with_session(request: ApprovalRequest) -> ApprovalDecision:
+            nonlocal callback_count
+            await asyncio.sleep(0.01)
+            callback_count += 1
+            return ApprovalDecision(approved=True, remember="session")
+
+        def list_files(path: str) -> str:
+            """List files in a directory."""
+            return f"Files in {path}"
+
+        inner_toolset = FunctionToolset([list_files])
+        memory = ApprovalMemory()
+        approved_toolset = ApprovalToolset(
+            inner=inner_toolset,
+            approval_callback=async_approve_with_session,
+            memory=memory,
+        )
+
+        agent = Agent(
+            model=TestModel(),
+            toolsets=[approved_toolset],
+        )
+
+        # First call - should invoke async callback
+        asyncio.run(
+            agent.run(
+                "List files in /tmp",
+                model=TestModel(call_tools=["list_files"]),
+            )
+        )
+
+        # Second call with same args - should use cache
+        asyncio.run(
+            agent.run(
+                "List files in /tmp",
+                model=TestModel(call_tools=["list_files"]),
+            )
+        )
+
+        # Callback should only be called once (second call uses cache)
+        assert callback_count == 1
+
+    def test_controller_request_approval_async(self):
+        """Test ApprovalController.request_approval_async method."""
+        async def async_callback(request: ApprovalRequest) -> ApprovalDecision:
+            await asyncio.sleep(0.01)
+            return ApprovalDecision(approved=True, remember="session")
+
+        controller = ApprovalController(
+            mode="interactive",
+            approval_callback=async_callback,
+        )
+
+        request = ApprovalRequest(
+            tool_name="test_tool",
+            tool_args={"arg": "value"},
+            description="Test tool call",
+        )
+
+        async def test_async():
+            decision = await controller.request_approval_async(request)
+            assert decision.approved
+            assert decision.remember == "session"
+
+            # Second call should use cache
+            decision2 = await controller.request_approval_async(request)
+            assert decision2.approved
+
+        asyncio.run(test_async())
+
+    def test_controller_request_approval_async_approve_all_mode(self):
+        """Test request_approval_async in approve_all mode."""
+        controller = ApprovalController(mode="approve_all")
+
+        request = ApprovalRequest(
+            tool_name="any_tool",
+            tool_args={},
+            description="Any operation",
+        )
+
+        async def test_async():
+            decision = await controller.request_approval_async(request)
+            assert decision.approved
+
+        asyncio.run(test_async())
+
+    def test_controller_request_approval_async_strict_mode(self):
+        """Test request_approval_async in strict mode."""
+        controller = ApprovalController(mode="strict")
+
+        request = ApprovalRequest(
+            tool_name="any_tool",
+            tool_args={},
+            description="Any operation",
+        )
+
+        async def test_async():
+            decision = await controller.request_approval_async(request)
+            assert not decision.approved
+            assert "Strict mode" in decision.note
+
+        asyncio.run(test_async())
+
+    def test_mixed_sync_callback_with_async_toolset(self):
+        """Test that sync callbacks still work with the async-capable toolset."""
+        approval_requests: list[ApprovalRequest] = []
+
+        def sync_callback(request: ApprovalRequest) -> ApprovalDecision:
+            # Sync callback (no async/await)
+            approval_requests.append(request)
+            return ApprovalDecision(approved=True)
+
+        def get_data(key: str) -> str:
+            """Get data by key."""
+            return f"Data for {key}"
+
+        inner_toolset = FunctionToolset([get_data])
+        approved_toolset = ApprovalToolset(
+            inner=inner_toolset,
+            approval_callback=sync_callback,
+        )
+
+        agent = Agent(
+            model=TestModel(),
+            toolsets=[approved_toolset],
+        )
+
+        result = asyncio.run(
+            agent.run(
+                "Get data for key1",
+                model=TestModel(call_tools=["get_data"]),
+            )
+        )
+
+        assert len(approval_requests) == 1
+        assert approval_requests[0].tool_name == "get_data"

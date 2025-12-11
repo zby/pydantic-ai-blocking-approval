@@ -1,9 +1,8 @@
-"""Synchronous, blocking approval system for PydanticAI agent tools.
+"""Blocking approval system for PydanticAI agent tools.
 
 This package provides human-in-the-loop approval handling for LLM agent tools.
-Unlike deferred/async approval patterns, this system blocks execution until
-the user decides, making it ideal for CLI and interactive use cases where
-the user is present at the terminal.
+Supports both synchronous blocking callbacks (for CLI) and asynchronous callbacks
+(for web UI, Slack bots, etc.).
 
 Key Components:
     - ApprovalResult: Structured result from approval checking (blocked/pre_approved/needs_approval)
@@ -14,6 +13,7 @@ Key Components:
     - ApprovalController: Mode-based controller (interactive/approve_all/strict)
     - SupportsNeedsApproval: Protocol for toolsets with custom approval logic
     - SupportsApprovalDescription: Protocol for custom approval descriptions
+    - ApprovalCallback: Type alias for sync/async approval callbacks
 
 Example with config (simple inner toolset):
     from pydantic_ai import Agent
@@ -74,22 +74,28 @@ from .controller import ApprovalController
 from .memory import ApprovalMemory
 from .toolset import ApprovalToolset
 from .types import (
+    ApprovalCallback,
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
+    AsyncApprovalCallback,
     SupportsApprovalDescription,
     SupportsNeedsApproval,
+    SyncApprovalCallback,
 )
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
+    "ApprovalCallback",
     "ApprovalController",
     "ApprovalDecision",
     "ApprovalMemory",
     "ApprovalRequest",
     "ApprovalResult",
     "ApprovalToolset",
+    "AsyncApprovalCallback",
     "SupportsApprovalDescription",
     "SupportsNeedsApproval",
+    "SyncApprovalCallback",
 ]

@@ -5,10 +5,11 @@ and provides prompt functions for use with ApprovalToolset.
 """
 from __future__ import annotations
 
-from typing import Callable, Literal, Optional
+import asyncio
+from typing import Literal, Optional
 
 from .memory import ApprovalMemory
-from .types import ApprovalDecision, ApprovalRequest
+from .types import ApprovalCallback, ApprovalDecision, ApprovalRequest
 
 
 class ApprovalController:
@@ -48,14 +49,14 @@ class ApprovalController:
     def __init__(
         self,
         mode: Literal["interactive", "approve_all", "strict"] = "interactive",
-        approval_callback: Optional[Callable[[ApprovalRequest], ApprovalDecision]] = None,
+        approval_callback: Optional[ApprovalCallback] = None,
     ):
         """Initialize the approval controller.
 
         Args:
             mode: Runtime mode for approval handling
-            approval_callback: Optional sync callback for prompting user.
-                              Required for interactive mode.
+            approval_callback: Optional callback for prompting user.
+                Can be sync or async. Required for interactive mode.
         """
         self.mode = mode
         self._approval_callback = approval_callback
@@ -125,8 +126,56 @@ class ApprovalController:
 
         return decision
 
+    async def request_approval_async(self, request: ApprovalRequest) -> ApprovalDecision:
+        """Asynchronous approval request.
+
+        Handles the request based on the current mode:
+        - approve_all: Returns approved=True immediately
+        - strict: Returns approved=False with note
+        - interactive: Checks cache, then prompts via callback (sync or async)
+
+        Args:
+            request: The approval request
+
+        Returns:
+            ApprovalDecision with the result
+
+        Raises:
+            NotImplementedError: If interactive mode has no callback
+        """
+        # Handle non-interactive modes
+        if self.mode == "approve_all":
+            return ApprovalDecision(approved=True)
+        if self.mode == "strict":
+            return ApprovalDecision(
+                approved=False, note=f"Strict mode: {request.tool_name} requires approval"
+            )
+
+        # Check session cache
+        cached = self._memory.lookup(request.tool_name, request.tool_args)
+        if cached is not None:
+            return cached
+
+        # Prompt user
+        if self._approval_callback is None:
+            raise NotImplementedError(
+                "No approval_callback provided for interactive mode"
+            )
+
+        # Handle both sync and async callbacks
+        if asyncio.iscoroutinefunction(self._approval_callback):
+            decision = await self._approval_callback(request)
+        else:
+            decision = self._approval_callback(request)
+
+        # Cache if remember="session"
+        if decision.approved and decision.remember == "session":
+            self._memory.store(request.tool_name, request.tool_args, decision)
+
+        return decision
+
     @property
-    def approval_callback(self) -> Callable[[ApprovalRequest], ApprovalDecision]:
+    def approval_callback(self) -> ApprovalCallback:
         """Get the approval callback based on mode.
 
         Returns a prompt function suitable for ApprovalToolset.

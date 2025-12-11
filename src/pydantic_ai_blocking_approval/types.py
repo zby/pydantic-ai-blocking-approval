@@ -6,11 +6,12 @@ This module defines the fundamental data types for the blocking approval system:
 - ApprovalDecision: User's decision about a tool call
 - SupportsNeedsApproval: Protocol for toolsets with custom approval logic
 - SupportsApprovalDescription: Protocol for custom approval descriptions
+- ApprovalCallback: Type alias for sync/async approval callbacks
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Protocol, runtime_checkable
+from typing import Any, Awaitable, Callable, Literal, Optional, Protocol, Union, runtime_checkable
 
 from pydantic import BaseModel
 from pydantic_ai import RunContext
@@ -148,3 +149,9 @@ class ApprovalDecision(BaseModel):
     approved: bool
     note: Optional[str] = None
     remember: Literal["none", "session"] = "none"
+
+
+# Type alias for approval callbacks - supports both sync and async
+SyncApprovalCallback = Callable[["ApprovalRequest"], "ApprovalDecision"]
+AsyncApprovalCallback = Callable[["ApprovalRequest"], Awaitable["ApprovalDecision"]]
+ApprovalCallback = Union[SyncApprovalCallback, AsyncApprovalCallback]
