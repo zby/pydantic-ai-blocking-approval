@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2025-12-11
+
+### Added
+
+- Async callback support for web UI, Slack bots, and other async approval workflows
+- `ApprovalCallback` type alias - accepts both sync and async callbacks
+- `ApprovalController.request_approval()` - async method that handles both sync and async callbacks
+- Detection uses `inspect.isawaitable()` on callback result for maximum flexibility
+
+### Changed
+
+- `ApprovalToolset._prompt_for_approval()` is now async internally
+- `ApprovalController` accepts async callbacks via the existing `approval_callback` parameter
+
+### Fixed
+
+- `ApprovalController.request_approval_sync()` now raises `TypeError` if given an async callback
+  - Previously would return an unawaited coroutine (silent bug)
+  - Error message directs users to `request_approval()` for async callbacks
+
+### Documentation
+
+- Added `docs/design.md` - consolidated design documentation with async coverage
+- Added `docs/case_for_core.md` - context on blocking vs deferred approval patterns
+
 ## [0.7.0] - 2025-12-03
 
 ### Added
