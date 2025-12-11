@@ -24,7 +24,7 @@ PydanticAI's current approval model is **deferred** - tool calls are collected, 
 
 For interactive scenarios (CLI agents, multi-step dangerous operations), blocking approval provides a different UX where the agent can see results before planning the next step. Both patterns have their place depending on the use case.
 
-Stateless functions are good - they're easier to test, reason about, and compose. But some things are inherently stateful. Approval is one of them: you need to remember what was approved during a session to avoid repetitive prompts for the same operation. This library provides the minimum state needed to cover this case - just a session-scoped cache of approval decisions.
+Stateless functions are good - they're easier to test, reason about, and compose. But some things are inherently stateful. Blocking approval is one of them: the system must pause execution and wait for user decision - that's a "waiting for approval" state. Additionally, session caching requires remembering past decisions. This library provides the minimum state needed: execution suspension and a session-scoped approval cache.
 
 ## This Library's Approach
 
