@@ -91,6 +91,9 @@ class ApprovalController:
         - strict: Returns approved=False with note
         - interactive: Checks cache, then prompts via callback
 
+        Note: This method requires a synchronous callback. If you have an
+        async callback (for web UI, Slack, etc.), use request_approval() instead.
+
         Args:
             request: The approval request
 
@@ -99,6 +102,7 @@ class ApprovalController:
 
         Raises:
             NotImplementedError: If interactive mode has no callback
+            TypeError: If callback is async (use request_approval() instead)
         """
         # Handle non-interactive modes
         if self.mode == "approve_all":
@@ -118,6 +122,13 @@ class ApprovalController:
             raise NotImplementedError(
                 "No approval_callback provided for interactive mode"
             )
+
+        if inspect.iscoroutinefunction(self._approval_callback):
+            raise TypeError(
+                "request_approval_sync() requires a sync callback. "
+                "Use request_approval() for async callbacks."
+            )
+
         decision = self._approval_callback(request)
 
         # Cache if remember="session"

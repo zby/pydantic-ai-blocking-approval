@@ -176,3 +176,81 @@ class TestApprovalController:
 
         with pytest.raises(RuntimeError, match="No approval_callback set"):
             _ = controller.approval_callback
+
+    def test_request_approval_sync_with_async_callback_raises(self):
+        """request_approval_sync raises TypeError if callback is async."""
+
+        async def async_callback(request: ApprovalRequest) -> ApprovalDecision:
+            return ApprovalDecision(approved=True)
+
+        controller = ApprovalController(
+            mode="interactive",
+            approval_callback=async_callback,
+        )
+        request = ApprovalRequest(
+            tool_name="tool",
+            tool_args={},
+            description="Test",
+        )
+
+        with pytest.raises(TypeError, match="requires a sync callback"):
+            controller.request_approval_sync(request)
+
+    def test_request_approval_without_callback_raises(self):
+        """request_approval (async) raises RuntimeError if no callback."""
+        import asyncio
+
+        controller = ApprovalController(mode="interactive")
+        request = ApprovalRequest(
+            tool_name="tool",
+            tool_args={},
+            description="Test",
+        )
+
+        async def test_async():
+            with pytest.raises(RuntimeError, match="No approval_callback"):
+                await controller.request_approval(request)
+
+        asyncio.run(test_async())
+
+    def test_callback_exception_propagates_sync(self):
+        """Callback exceptions propagate through request_approval_sync."""
+
+        def failing_callback(request: ApprovalRequest) -> ApprovalDecision:
+            raise ValueError("Approval service unavailable")
+
+        controller = ApprovalController(
+            mode="interactive",
+            approval_callback=failing_callback,
+        )
+        request = ApprovalRequest(
+            tool_name="tool",
+            tool_args={},
+            description="Test",
+        )
+
+        with pytest.raises(ValueError, match="Approval service unavailable"):
+            controller.request_approval_sync(request)
+
+    def test_callback_exception_propagates_async(self):
+        """Callback exceptions propagate through request_approval (async)."""
+        import asyncio
+
+        async def failing_callback(request: ApprovalRequest) -> ApprovalDecision:
+            raise ConnectionError("Lost connection to approval server")
+
+        controller = ApprovalController(
+            mode="interactive",
+            approval_callback=failing_callback,
+        )
+        request = ApprovalRequest(
+            tool_name="tool",
+            tool_args={},
+            description="Test",
+        )
+
+        async def test_async():
+            with pytest.raises(ConnectionError, match="Lost connection"):
+                await controller.request_approval(request)
+
+        asyncio.run(test_async())
