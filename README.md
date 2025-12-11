@@ -6,79 +6,119 @@ Synchronous, blocking approval system for PydanticAI agent tools.
 
 ## Why This Package?
 
-PydanticAI provides `DeferredToolRequests` for human-in-the-loop approval, but it's designed for **asynchronous, out-of-band** approval flows. This package provides an alternative for **synchronous, blocking** approval - a fundamentally different pattern.
+PydanticAI provides `DeferredToolRequests` for human-in-the-loop approval, following PydanticAI's core design philosophy of **stateless, functional tools**. This package provides an alternative for **synchronous, blocking** approval—a pattern that deliberately trades functional purity for interactive convenience.
 
-### PydanticAI's Deferred Tools (async/out-of-band)
+### The Design Philosophy Tension
 
-```
-Agent Run → Returns with pending tools → [Time passes] → User approves via API/webhook → Resume agent
-```
-
-The deferred pattern is ideal when:
-- User isn't present during execution (web apps, background jobs)
-- Approval happens out-of-band (email links, admin dashboards, Slack buttons)
-- Hours or days may pass between request and approval
-- You need to serialize/persist the pending state
-
-### Blocking Approval (this package)
+PydanticAI is built around stateless, reusable agents. Tools are pure functions. The deferred pattern preserves this:
 
 ```
-Agent Run → Tool needs approval → [Blocks] → User prompted immediately → [Decides] → Execution continues
+Agent Run → Returns immediately with pending tools → [State serialized] → User approves later → New agent run resumes
 ```
 
-The blocking pattern is ideal when:
-- User is present at the terminal (CLI tools, interactive sessions)
-- Approval must happen immediately, inline with execution
-- The agent run should complete in one continuous session
-- You want simple "approve and continue" UX without state management
+This keeps tools stateless—they don't block waiting for I/O. Control flow returns to your application, which handles approval however it wants (webhooks, admin dashboards, Slack buttons).
+
+**This package breaks that model.** Blocking approval pauses execution mid-tool-call:
+
+```
+Agent Run → Tool needs approval → [Blocks on user input] → User decides → Execution continues
+```
+
+The tool is no longer a pure function—it has a side effect (waiting for human input) that couples it to the runtime environment. This is an intentional trade-off.
+
+### When Blocking Makes Sense
+
+The deferred pattern struggles with two common patterns:
+
+**1. Exploratory, multi-step tasks** where each step depends on the previous result:
+
+```
+You: "Find and kill the process hogging port 8080"
+
+With deferred approval:
+  Agent returns: pending shell_exec("lsof -i :8080")  ← needs approval
+  Agent run ends here.
+
+  You approve... but the agent already returned. It can't see the output
+  (PID 1234 = node). You need a new conversation to continue.
+```
+
+The problem: the dangerous action (shell access) produces information the LLM needs to plan the next step. With deferred, each approval breaks the conversation.
+
+```
+With blocking approval:
+  Agent: I'll find what's using port 8080.
+  [APPROVAL REQUIRED] shell_exec("lsof -i :8080") [y/n]: y
+  Output: node (PID 1234)
+
+  Agent: Found it - node process 1234. I'll kill it.
+  [APPROVAL REQUIRED] shell_exec("kill 1234") [y/n]: y
+
+  Done! Port 8080 is free.
+```
+
+Blocking keeps the LLM "in the loop"—it sees each result and plans accordingly.
+
+**2. Recursive/nested tool calls** where tools spawn sub-agents or delegate work:
+
+```python
+# A "call_worker" tool that delegates focused tasks to a sub-agent
+@agent.tool
+def call_worker(ctx: RunContext, task: str) -> str:
+    """Spawn a focused worker agent for a specific subtask."""
+    worker_result = worker_agent.run_sync(task)  # ← This needs to actually execute
+    return worker_result.output
+```
+
+With deferred approval, `call_worker` can't actually call anything—it returns immediately with a pending state. The recursive invocation never happens. You'd need to:
+1. Approve the outer `call_worker` call
+2. Resume... but now the worker's tools need approval
+3. Approve each worker tool, one agent run at a time
+4. Somehow stitch the results back together
+
+The hierarchical context is lost. With blocking, the entire call tree executes naturally, with approval prompts appearing inline as needed.
 
 ### Comparison
 
 | Aspect | Deferred (PydanticAI) | Blocking (this package) |
 |--------|----------------------|-------------------------|
-| **Execution** | Agent run completes, returns pending | Agent run pauses mid-execution |
-| **Timing** | Minutes to days between request/approval | Immediate, synchronous |
-| **User presence** | Not required during execution | Must be present |
-| **State** | Must serialize/persist pending state | No state management needed |
-| **Resume** | Explicit resume call with decisions | Automatic after user input |
+| **Philosophy** | Stateless tools, functional purity | Trades purity for interactivity |
+| **Execution** | Agent run returns, resumes later | Agent pauses mid-execution |
+| **Timing** | Minutes to days | Immediate |
+| **Multi-step tasks** | Each approval breaks the flow | Continuous conversation |
+| **State management** | You serialize/persist pending state | None needed |
 | **Best for** | Web apps, APIs, async workflows | CLI tools, interactive sessions |
 
-### Why Blocking Matters for Dangerous Actions
+### When to Use Which
 
-Consider: you ask the agent to "find and kill the process hogging port 8080."
+**Use PydanticAI's deferred tools when:**
+- User isn't present during execution
+- Approval can happen out-of-band (email, dashboard, Slack)
+- Tasks are self-contained (approval doesn't affect planning)
+- You need the stateless/functional model
 
-**With deferred approval:**
-```
-Agent run completes with pending actions:
-  1. shell_exec("lsof -i :8080")    ← Needs approval (shell access)
+**Use blocking approval when:**
+- User is at the terminal, watching execution
+- Tasks are exploratory (each step informs the next)
+- You want "approve and continue" without conversation breaks
+- Simplicity matters more than functional purity
 
-Agent run ends here - LLM can't plan further because it doesn't
-know what process is using the port until the command runs.
+### Honest Trade-offs
 
-You approve... command shows PID 1234 (node). But the agent didn't
-plan the kill command. You need a new conversation to continue.
-```
+This package intentionally breaks PydanticAI's design principles. You should understand the costs:
 
-The problem: the dangerous action (shell access) produces information the LLM needs to plan the next step. With deferred approval, it can't proceed.
+**What you lose with blocking:**
+- **Stateless tools** — Your approval callback has side effects (user I/O)
+- **Testability** — Can't run agent without mocking the callback
+- **Scalability** — One blocked agent = one blocked event loop slot
+- **Async purity** — You're mixing sync blocking into async code
 
-**With blocking approval:**
-```
-Agent: I'll find what's using port 8080.
+**What you gain:**
+- **Continuous conversation** — LLM sees each result, plans next step
+- **Simple mental model** — Approve and continue, no state to manage
+- **Interactive UX** — Real-time approval at the terminal
 
-[APPROVAL REQUIRED] shell_exec("lsof -i :8080")
-[y/n/s]: y
-
-Output: node (PID 1234)
-
-Agent: Found it - node process 1234. I'll kill it.
-
-[APPROVAL REQUIRED] shell_exec("kill 1234")
-[y/n/s]: y
-
-Done! Process killed, port 8080 is now free.
-```
-
-The key difference: with blocking, the LLM sees the result of each approved action and plans accordingly. With deferred, dangerous actions that produce information block all further progress.
+**If PydanticAI adds blocking approval natively**, you should probably use that instead. This package exists because the deferred pattern doesn't work well for CLI tools with exploratory, multi-step tasks—a gap that may be filled upstream.
 
 ## Architecture Overview
 
