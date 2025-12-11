@@ -818,8 +818,8 @@ class TestAsyncCallbacks:
         # Callback should only be called once (second call uses cache)
         assert callback_count == 1
 
-    def test_controller_request_approval_async(self):
-        """Test ApprovalController.request_approval_async method."""
+    def test_controller_request_approval(self):
+        """Test ApprovalController.request_approval method."""
         async def async_callback(request: ApprovalRequest) -> ApprovalDecision:
             await asyncio.sleep(0.01)
             return ApprovalDecision(approved=True, remember="session")
@@ -836,18 +836,18 @@ class TestAsyncCallbacks:
         )
 
         async def test_async():
-            decision = await controller.request_approval_async(request)
+            decision = await controller.request_approval(request)
             assert decision.approved
             assert decision.remember == "session"
 
             # Second call should use cache
-            decision2 = await controller.request_approval_async(request)
+            decision2 = await controller.request_approval(request)
             assert decision2.approved
 
         asyncio.run(test_async())
 
-    def test_controller_request_approval_async_approve_all_mode(self):
-        """Test request_approval_async in approve_all mode."""
+    def test_controller_request_approval_approve_all_mode(self):
+        """Test request_approval in approve_all mode."""
         controller = ApprovalController(mode="approve_all")
 
         request = ApprovalRequest(
@@ -857,13 +857,13 @@ class TestAsyncCallbacks:
         )
 
         async def test_async():
-            decision = await controller.request_approval_async(request)
+            decision = await controller.request_approval(request)
             assert decision.approved
 
         asyncio.run(test_async())
 
-    def test_controller_request_approval_async_strict_mode(self):
-        """Test request_approval_async in strict mode."""
+    def test_controller_request_approval_strict_mode(self):
+        """Test request_approval in strict mode."""
         controller = ApprovalController(mode="strict")
 
         request = ApprovalRequest(
@@ -873,7 +873,7 @@ class TestAsyncCallbacks:
         )
 
         async def test_async():
-            decision = await controller.request_approval_async(request)
+            decision = await controller.request_approval(request)
             assert not decision.approved
             assert "Strict mode" in decision.note
 

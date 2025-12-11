@@ -78,10 +78,8 @@ from .types import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
-    AsyncApprovalCallback,
     SupportsApprovalDescription,
     SupportsNeedsApproval,
-    SyncApprovalCallback,
 )
 
 __version__ = "0.8.0"
@@ -94,8 +92,6 @@ __all__ = [
     "ApprovalRequest",
     "ApprovalResult",
     "ApprovalToolset",
-    "AsyncApprovalCallback",
     "SupportsApprovalDescription",
     "SupportsNeedsApproval",
-    "SyncApprovalCallback",
 ]

@@ -152,6 +152,7 @@ class ApprovalDecision(BaseModel):
 
 
 # Type alias for approval callbacks - supports both sync and async
-SyncApprovalCallback = Callable[["ApprovalRequest"], "ApprovalDecision"]
-AsyncApprovalCallback = Callable[["ApprovalRequest"], Awaitable["ApprovalDecision"]]
-ApprovalCallback = Union[SyncApprovalCallback, AsyncApprovalCallback]
+ApprovalCallback = Callable[
+    ["ApprovalRequest"],
+    Union["ApprovalDecision", Awaitable["ApprovalDecision"]]
+]

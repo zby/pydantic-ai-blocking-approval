@@ -6,7 +6,7 @@ implements SupportsNeedsApproval protocol and delegates accordingly.
 """
 from __future__ import annotations
 
-import asyncio
+import inspect
 from typing import Any, Optional
 
 from pydantic_ai import RunContext
@@ -142,10 +142,11 @@ class ApprovalToolset(AbstractToolset):
         )
 
         # Handle both sync and async callbacks
-        if asyncio.iscoroutinefunction(self._approval_callback):
-            decision = await self._approval_callback(request)
+        result = self._approval_callback(request)
+        if inspect.isawaitable(result):
+            decision = await result
         else:
-            decision = self._approval_callback(request)
+            decision = result
 
         self._memory.store(name, tool_args, decision)
 

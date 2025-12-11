@@ -5,7 +5,7 @@ and provides prompt functions for use with ApprovalToolset.
 """
 from __future__ import annotations
 
-import asyncio
+import inspect
 from typing import Literal, Optional
 
 from .memory import ApprovalMemory
@@ -126,10 +126,11 @@ class ApprovalController:
 
         return decision
 
-    async def request_approval_async(self, request: ApprovalRequest) -> ApprovalDecision:
-        """Asynchronous approval request.
+    async def request_approval(self, request: ApprovalRequest) -> ApprovalDecision:
+        """Async-aware approval request.
 
-        Handles the request based on the current mode:
+        Works with both sync and async callbacks. Handles the request based
+        on the current mode:
         - approve_all: Returns approved=True immediately
         - strict: Returns approved=False with note
         - interactive: Checks cache, then prompts via callback (sync or async)
@@ -141,7 +142,7 @@ class ApprovalController:
             ApprovalDecision with the result
 
         Raises:
-            NotImplementedError: If interactive mode has no callback
+            RuntimeError: If interactive mode has no callback
         """
         # Handle non-interactive modes
         if self.mode == "approve_all":
@@ -158,15 +159,16 @@ class ApprovalController:
 
         # Prompt user
         if self._approval_callback is None:
-            raise NotImplementedError(
+            raise RuntimeError(
                 "No approval_callback provided for interactive mode"
             )
 
         # Handle both sync and async callbacks
-        if asyncio.iscoroutinefunction(self._approval_callback):
-            decision = await self._approval_callback(request)
+        result = self._approval_callback(request)
+        if inspect.isawaitable(result):
+            decision = await result
         else:
-            decision = self._approval_callback(request)
+            decision = result
 
         # Cache if remember="session"
         if decision.approved and decision.remember == "session":
