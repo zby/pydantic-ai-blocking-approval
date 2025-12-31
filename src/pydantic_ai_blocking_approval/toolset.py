@@ -22,6 +22,7 @@ from .types import (
     SupportsApprovalDescription,
     SupportsNeedsApproval,
     ensure_decision,
+    needs_approval_from_config,
 )
 
 
@@ -32,6 +33,7 @@ class ApprovalToolset(AbstractToolset):
     Automatically detects if the inner toolset implements `SupportsNeedsApproval`:
 
     - If inner implements SupportsNeedsApproval: delegates approval decision to it
+      (config is passed through for toolset-defined policy)
     - Otherwise: uses config dict to determine pre-approved tools (secure by default)
 
     Example with config (simple inner toolset):
@@ -47,7 +49,16 @@ class ApprovalToolset(AbstractToolset):
 
     Example with smart inner toolset:
         class MyToolset(AbstractToolset):
-            def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> ApprovalResult:
+            def needs_approval(
+                self,
+                name: str,
+                tool_args: dict,
+                ctx: RunContext,
+                config: dict[str, dict[str, Any]],
+            ) -> ApprovalResult:
+                base = needs_approval_from_config(name, config)
+                if base.is_pre_approved:
+                    return base
                 if name == "forbidden":
                     return ApprovalResult.blocked("Not allowed")
                 if name == "safe_tool":
@@ -83,7 +94,8 @@ class ApprovalToolset(AbstractToolset):
                 Must return an ApprovalDecision.
             config: Per-tool configuration dict. Each key is a tool name, value is
                 a dict with optional "pre_approved": True to skip approval.
-                Only used when inner doesn't implement SupportsNeedsApproval.
+                Passed to needs_approval when inner implements SupportsNeedsApproval,
+                otherwise used for default approval decisions.
         """
         self._inner = inner
         self._approval_callback = approval_callback
@@ -107,7 +119,7 @@ class ApprovalToolset(AbstractToolset):
     ) -> ApprovalResult:
         """Get approval result from inner toolset or config."""
         if isinstance(self._inner, SupportsNeedsApproval):
-            result = self._inner.needs_approval(name, tool_args, ctx)
+            result = self._inner.needs_approval(name, tool_args, ctx, self.config)
             if inspect.isawaitable(result):
                 result = await result
             if not isinstance(result, ApprovalResult):
@@ -115,10 +127,7 @@ class ApprovalToolset(AbstractToolset):
             return result
 
         # Config-based fallback (secure by default)
-        tool_config = self.config.get(name, {})
-        if tool_config.get("pre_approved"):
-            return ApprovalResult.pre_approved()
-        return ApprovalResult.needs_approval()
+        return needs_approval_from_config(name, self.config)
 
     def _get_description(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]

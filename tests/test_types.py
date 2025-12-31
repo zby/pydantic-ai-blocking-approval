@@ -8,6 +8,7 @@ from pydantic_ai_blocking_approval import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
+    needs_approval_from_config,
 )
 
 
@@ -101,3 +102,16 @@ class TestApprovalDecision:
         )
         assert decision.approved is False
         assert decision.note == "Not safe to execute"
+
+
+class TestNeedsApprovalFromConfig:
+    """Tests for needs_approval_from_config helper."""
+
+    def test_pre_approved_from_config(self):
+        config = {"safe_tool": {"pre_approved": True}}
+        result = needs_approval_from_config("safe_tool", config)
+        assert result.is_pre_approved
+
+    def test_default_needs_approval(self):
+        result = needs_approval_from_config("unknown_tool", {})
+        assert result.is_needs_approval

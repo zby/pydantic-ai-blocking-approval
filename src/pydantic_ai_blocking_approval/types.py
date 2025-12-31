@@ -7,11 +7,13 @@ This module defines the fundamental data types for the blocking approval system:
 - SupportsNeedsApproval: Protocol for toolsets with custom approval logic
 - SupportsApprovalDescription: Protocol for custom approval descriptions
 - ApprovalCallback: Type alias for sync/async approval callbacks
+- ApprovalConfig: Mapping type for per-tool config
+- needs_approval_from_config: Helper for default config-based decisions
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Literal, Optional, Protocol, Union, runtime_checkable
+from typing import Any, Awaitable, Callable, Literal, Mapping, Optional, Protocol, Union, runtime_checkable
 
 from pydantic import BaseModel
 from pydantic_ai import RunContext
@@ -64,6 +66,9 @@ class ApprovalResult:
         return self.status == "needs_approval"
 
 
+ApprovalConfig = Mapping[str, Mapping[str, Any]]
+
+
 @runtime_checkable
 class SupportsNeedsApproval(Protocol):
     """Protocol for toolsets with custom approval logic.
@@ -73,7 +78,16 @@ class SupportsNeedsApproval(Protocol):
 
     Example:
         class MyToolset(AbstractToolset):
-            def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> ApprovalResult:
+            def needs_approval(
+                self,
+                name: str,
+                tool_args: dict,
+                ctx: RunContext,
+                config: ApprovalConfig,
+            ) -> ApprovalResult:
+                base = needs_approval_from_config(name, config)
+                if base.is_pre_approved:
+                    return base
                 if name == "forbidden_tool":
                     return ApprovalResult.blocked("Tool is disabled")
                 if name == "safe_tool":
@@ -82,7 +96,11 @@ class SupportsNeedsApproval(Protocol):
     """
 
     def needs_approval(
-        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
+        self,
+        name: str,
+        tool_args: dict[str, Any],
+        ctx: RunContext[Any],
+        config: ApprovalConfig,
     ) -> ApprovalResult | Awaitable[ApprovalResult]:
         """Determine approval status for a tool call.
 
@@ -90,6 +108,7 @@ class SupportsNeedsApproval(Protocol):
             name: Tool name being called
             tool_args: Arguments passed to the tool
             ctx: PydanticAI run context
+            config: ApprovalToolset config passed through from the wrapper
 
         Returns:
             ApprovalResult with status: blocked, pre_approved, or needs_approval
@@ -188,6 +207,16 @@ def ensure_decision(result: Any) -> "ApprovalDecision":
     if isinstance(result, ApprovalDecision):
         return result
     raise TypeError("approval_callback must return ApprovalDecision")
+
+
+def needs_approval_from_config(
+    name: str, config: ApprovalConfig | None
+) -> ApprovalResult:
+    """Default approval decision from config (secure by default)."""
+    tool_config = (config or {}).get(name, {})
+    if tool_config.get("pre_approved"):
+        return ApprovalResult.pre_approved()
+    return ApprovalResult.needs_approval()
 
 
 # Type alias for approval callbacks - supports both sync/async decisions

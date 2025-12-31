@@ -126,8 +126,8 @@ This package intentionally breaks PydanticAI's design principles. You should und
 ApprovalToolset (unified wrapper)
     ├── intercepts call_tool()
     ├── auto-detects if inner implements SupportsNeedsApproval
-    │   ├── YES: delegates to inner.needs_approval() → ApprovalResult
-    │   └── NO: uses config[tool_name]["pre_approved"]
+    │   ├── YES: delegates to inner.needs_approval(..., config) → ApprovalResult
+    │   └── NO: uses needs_approval_from_config(name, config)
     ├── handles ApprovalResult:
     │   ├── blocked → raises PermissionError
     │   ├── pre_approved → proceeds without prompting
@@ -136,7 +136,7 @@ ApprovalToolset (unified wrapper)
     └── proceeds or raises PermissionError
 ```
 
-**How it works:** `ApprovalToolset` automatically detects whether your inner toolset implements the `SupportsNeedsApproval` protocol. If it does, approval decisions are delegated to `inner.needs_approval()` which returns an `ApprovalResult` (blocked, pre_approved, or needs_approval). Otherwise, it falls back to config-based approval (secure by default).
+**How it works:** `ApprovalToolset` automatically detects whether your inner toolset implements the `SupportsNeedsApproval` protocol. If it does, approval decisions are delegated to `inner.needs_approval(..., config)` which returns an `ApprovalResult` (blocked, pre_approved, or needs_approval). Otherwise, it falls back to config-based approval (secure by default) using `needs_approval_from_config()`.
 
 **Note on async:** The toolset methods are `async` because PydanticAI's `AbstractToolset` interface requires it. The "blocking" refers to the `approval_callback` — a synchronous function that blocks the coroutine until the user decides. `needs_approval()` may be sync or async; if it returns an awaitable, `ApprovalToolset` awaits it. So `async def call_tool()` awaits the inner toolset, but the approval prompt in the middle is synchronous and blocking.
 
@@ -232,9 +232,15 @@ Tools with `pre_approved: True` skip approval. Tools not in config require appro
 For inner toolsets with custom approval logic, implement `SupportsNeedsApproval`:
 
 ```python
+from typing import Any
+
 from pydantic_ai import RunContext
 from pydantic_ai.toolsets.abstract import AbstractToolset
-from pydantic_ai_blocking_approval import ApprovalResult, ApprovalToolset
+from pydantic_ai_blocking_approval import (
+    ApprovalResult,
+    ApprovalToolset,
+    needs_approval_from_config,
+)
 
 class MySmartToolset(AbstractToolset):
     """Inner toolset with custom approval logic (implements SupportsNeedsApproval)."""
@@ -242,7 +248,16 @@ class MySmartToolset(AbstractToolset):
     SAFE_COMMANDS = {"ls", "pwd", "echo", "date"}
     BLOCKED_COMMANDS = {"rm -rf /", "shutdown"}
 
-    def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> ApprovalResult:
+    def needs_approval(
+        self,
+        name: str,
+        tool_args: dict,
+        ctx: RunContext,
+        config: dict[str, dict[str, Any]],
+    ) -> ApprovalResult:
+        base = needs_approval_from_config(name, config)
+        if base.is_pre_approved:
+            return base
         if name == "safe_tool":
             return ApprovalResult.pre_approved()
 

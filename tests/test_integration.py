@@ -234,7 +234,11 @@ class AsyncNeedsApprovalToolset(AbstractToolset):
         return "pong"
 
     async def needs_approval(
-        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any] | None = None
+        self,
+        name: str,
+        tool_args: dict[str, Any],
+        ctx: RunContext[Any] | None = None,
+        config: dict[str, dict[str, Any]] | None = None,
     ) -> ApprovalResult:
         await asyncio.sleep(0)
         if name == "ping":
@@ -299,9 +303,8 @@ class ShellToolset(AbstractToolset):
     # Paths that are safe to read
     SAFE_READ_PATHS = {"/tmp", "/var/log", "."}
 
-    def __init__(self, config: dict[str, Any] | None = None) -> None:
+    def __init__(self) -> None:
         self._executed_commands: list[str] = []
-        self.config = config or {}
         self._last_description: str | None = None
 
     @property
@@ -334,7 +337,11 @@ class ShellToolset(AbstractToolset):
         raise ValueError(f"Unknown tool: {name}")
 
     def needs_approval(
-        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any] | None = None
+        self,
+        name: str,
+        tool_args: dict[str, Any],
+        ctx: RunContext[Any] | None = None,
+        config: dict[str, dict[str, Any]] | None = None,
     ) -> ApprovalResult:
         """Decide if shell command needs approval based on patterns.
 
@@ -343,7 +350,8 @@ class ShellToolset(AbstractToolset):
         """
         self._last_description = None
         # ctx is available for user-specific logic (e.g., ctx.deps)
-        tool_config = self.config.get(name, {})
+        config = config or {}
+        tool_config = config.get(name, {})
 
         # Check pre_approved first
         if tool_config.get("pre_approved"):
@@ -425,75 +433,114 @@ class TestShellToolsetWithApproval:
     def test_needs_approval_safe_commands(self):
         """Test that safe commands return pre_approved from needs_approval."""
         toolset = ShellToolset()
+        config = {}
 
         # Safe commands should return pre_approved
-        assert toolset.needs_approval("shell_exec", {"command": "ls -la"}).is_pre_approved
-        assert toolset.needs_approval("shell_exec", {"command": "pwd"}).is_pre_approved
-        assert toolset.needs_approval("shell_exec", {"command": "whoami"}).is_pre_approved
-        assert toolset.needs_approval("shell_exec", {"command": "date"}).is_pre_approved
-        assert toolset.needs_approval("shell_exec", {"command": "echo hello"}).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "ls -la"}, config=config
+        ).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "pwd"}, config=config
+        ).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "whoami"}, config=config
+        ).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "date"}, config=config
+        ).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "echo hello"}, config=config
+        ).is_pre_approved
 
     def test_needs_approval_dangerous_patterns(self):
         """Test that dangerous patterns return needs_approval with custom description."""
         toolset = ShellToolset()
+        config = {}
 
         # rm command
-        result = toolset.needs_approval("shell_exec", {"command": "rm -rf /tmp/files"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "rm -rf /tmp/files"}, config=config
+        )
         assert result.is_needs_approval
         desc = toolset.get_approval_description("shell_exec", {"command": "rm -rf /tmp/files"})
         assert "dangerous" in desc.lower()
         assert "rm -rf /tmp/files" in desc
 
         # sudo command
-        result = toolset.needs_approval("shell_exec", {"command": "sudo apt update"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "sudo apt update"}, config=config
+        )
         assert result.is_needs_approval
         desc = toolset.get_approval_description("shell_exec", {"command": "sudo apt update"})
         assert "dangerous" in desc.lower()
 
         # pipe
-        result = toolset.needs_approval("shell_exec", {"command": "ls | grep foo"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "ls | grep foo"}, config=config
+        )
         assert result.is_needs_approval
         desc = toolset.get_approval_description("shell_exec", {"command": "ls | grep foo"})
         assert "dangerous" in desc.lower()
 
         # redirect
-        result = toolset.needs_approval("shell_exec", {"command": "echo x > file"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "echo x > file"}, config=config
+        )
         assert result.is_needs_approval
 
         # command substitution
-        result = toolset.needs_approval("shell_exec", {"command": "echo $(whoami)"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "echo $(whoami)"}, config=config
+        )
         assert result.is_needs_approval
 
     def test_needs_approval_cat_safe_paths(self):
         """Test that cat on safe paths doesn't require approval."""
         toolset = ShellToolset()
+        config = {}
 
         # Safe paths
-        assert toolset.needs_approval("shell_exec", {"command": "cat /tmp/test.log"}).is_pre_approved
-        assert toolset.needs_approval("shell_exec", {"command": "cat /var/log/syslog"}).is_pre_approved
-        assert toolset.needs_approval("shell_exec", {"command": "cat ./local.txt"}).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "cat /tmp/test.log"}, config=config
+        ).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "cat /var/log/syslog"}, config=config
+        ).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "cat ./local.txt"}, config=config
+        ).is_pre_approved
 
     def test_needs_approval_cat_unsafe_paths(self):
         """Test that cat on sensitive paths requires approval."""
         toolset = ShellToolset()
+        config = {}
 
         # Unsafe paths
-        result = toolset.needs_approval("shell_exec", {"command": "cat /etc/passwd"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "cat /etc/passwd"}, config=config
+        )
         assert result.is_needs_approval
         desc = toolset.get_approval_description("shell_exec", {"command": "cat /etc/passwd"})
         assert "/etc/passwd" in desc
 
-        result = toolset.needs_approval("shell_exec", {"command": "cat /home/user/.ssh/id_rsa"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "cat /home/user/.ssh/id_rsa"}, config=config
+        )
         assert result.is_needs_approval
 
-        result = toolset.needs_approval("shell_exec", {"command": "cat ../etc/passwd"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "cat ../etc/passwd"}, config=config
+        )
         assert result.is_needs_approval
 
     def test_needs_approval_unknown_commands(self):
         """Test that unknown commands require approval with description."""
         toolset = ShellToolset()
+        config = {}
 
-        result = toolset.needs_approval("shell_exec", {"command": "mycustomtool --flag"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "mycustomtool --flag"}, config=config
+        )
         assert result.is_needs_approval
         desc = toolset.get_approval_description("shell_exec", {"command": "mycustomtool --flag"})
         assert "mycustomtool" in desc
@@ -583,26 +630,32 @@ class TestShellToolsetWithApproval:
     def test_unknown_tool_requires_approval(self):
         """Test that unknown tools require approval."""
         toolset = ShellToolset()
+        config = {}
 
         # Unknown tool should return needs_approval
-        result = toolset.needs_approval("unknown_tool", {"arg": "value"})
+        result = toolset.needs_approval(
+            "unknown_tool", {"arg": "value"}, config=config
+        )
         assert result.is_needs_approval
 
     def test_config_overrides_defaults(self):
         """Test that config can override default safe commands."""
-        toolset = ShellToolset(
-            config={
-                "shell_exec": {
-                    "safe_commands": ["ls"],  # Only ls is safe
-                },
+        toolset = ShellToolset()
+        config = {
+            "shell_exec": {
+                "safe_commands": ["ls"],  # Only ls is safe
             },
-        )
+        }
 
         # ls should still be safe
-        assert toolset.needs_approval("shell_exec", {"command": "ls -la"}).is_pre_approved
+        assert toolset.needs_approval(
+            "shell_exec", {"command": "ls -la"}, config=config
+        ).is_pre_approved
 
         # pwd is no longer in safe_commands, so requires approval
-        result = toolset.needs_approval("shell_exec", {"command": "pwd"})
+        result = toolset.needs_approval(
+            "shell_exec", {"command": "pwd"}, config=config
+        )
         assert result.is_needs_approval
 
 
@@ -630,7 +683,11 @@ class BlockingToolset(AbstractToolset):
         return f"Action: {name}"
 
     def needs_approval(
-        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any] | None = None
+        self,
+        name: str,
+        tool_args: dict[str, Any],
+        ctx: RunContext[Any] | None = None,
+        config: dict[str, dict[str, Any]] | None = None,
     ) -> ApprovalResult:
         if tool_args.get("blocked"):
             return ApprovalResult.blocked("This operation is forbidden")

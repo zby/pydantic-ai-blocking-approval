@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ApprovalConfig` type alias for per-tool config mappings
+- `needs_approval_from_config()` helper for applying the default config policy
+
+### Changed
+
+- **BREAKING**: `SupportsNeedsApproval.needs_approval()` now receives the toolset
+  config passed through from `ApprovalToolset`
+- `ApprovalToolset` always passes config into custom `needs_approval` implementations
+
+### Migration
+
+Update custom toolsets to accept the new `config` argument and apply defaults
+via `needs_approval_from_config()` if desired:
+
+```python
+from pydantic_ai_blocking_approval import ApprovalResult, needs_approval_from_config
+
+def needs_approval(self, name, tool_args, ctx, config):
+    base = needs_approval_from_config(name, config)
+    if base.is_pre_approved:
+        return base
+    # ...custom logic...
+    return ApprovalResult.needs_approval()
+```
+
 ## [0.9.0] - 2025-12-12
 
 ### Changed

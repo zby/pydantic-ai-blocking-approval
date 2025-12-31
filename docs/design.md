@@ -30,10 +30,12 @@ explain why, and `remember` can signal caller-managed session caching.
 ### 2. Unified wrapper with protocol detection
 
 A single `ApprovalToolset` auto-detects capabilities:
-- Inner implements `SupportsNeedsApproval` → delegate to `inner.needs_approval()`
-- Otherwise → use config dict for pre-approved tools
+- Inner implements `SupportsNeedsApproval` → delegate to `inner.needs_approval(..., config)`
+- Otherwise → use config dict for pre-approved tools via `needs_approval_from_config()`
 
 Simple case uses config; complex case (e.g., shell command analysis) implements the protocol.
+Custom toolsets can call `needs_approval_from_config(name, config)` to apply the
+default policy before adding their own rules.
 
 ### 3. Secure by default
 

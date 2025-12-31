@@ -44,11 +44,26 @@ Example with config (simple inner toolset):
     agent = Agent(..., toolsets=[approved_toolset])
 
 Example with smart inner toolset (implements SupportsNeedsApproval):
+    from typing import Any
+
     from pydantic_ai import RunContext
-    from pydantic_ai_blocking_approval import ApprovalResult, ApprovalToolset
+    from pydantic_ai_blocking_approval import (
+        ApprovalResult,
+        ApprovalToolset,
+        needs_approval_from_config,
+    )
 
     class MyToolset(AbstractToolset):
-        def needs_approval(self, name: str, tool_args: dict, ctx: RunContext) -> ApprovalResult:
+        def needs_approval(
+            self,
+            name: str,
+            tool_args: dict,
+            ctx: RunContext,
+            config: dict[str, dict[str, Any]],
+        ) -> ApprovalResult:
+            base = needs_approval_from_config(name, config)
+            if base.is_pre_approved:
+                return base
             if name == "forbidden":
                 return ApprovalResult.blocked("Not allowed")
             if name == "safe_tool":
@@ -71,6 +86,7 @@ For testing, use approve-all or strict callbacks:
 
 from .toolset import ApprovalToolset
 from .types import (
+    ApprovalConfig,
     ApprovalCallback,
     ApprovalBlocked,
     ApprovalDecision,
@@ -80,11 +96,13 @@ from .types import (
     ApprovalResult,
     SupportsApprovalDescription,
     SupportsNeedsApproval,
+    needs_approval_from_config,
 )
 
 __version__ = "0.9.0"
 
 __all__ = [
+    "ApprovalConfig",
     "ApprovalCallback",
     "ApprovalBlocked",
     "ApprovalDecision",
@@ -95,4 +113,5 @@ __all__ = [
     "ApprovalToolset",
     "SupportsApprovalDescription",
     "SupportsNeedsApproval",
+    "needs_approval_from_config",
 ]
