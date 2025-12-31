@@ -1,7 +1,8 @@
 """Integration tests with PydanticAI Agent and TestModel."""
 import asyncio
 import re
-from typing import Any
+from pathlib import PurePosixPath
+from typing import Any, Iterable
 
 import pytest
 from pydantic_ai import Agent, RunContext
@@ -11,6 +12,8 @@ from pydantic_ai.toolsets.abstract import AbstractToolset
 
 from pydantic_ai_blocking_approval import (
     ApprovalDecision,
+    ApprovalDenied,
+    ApprovalBlocked,
     ApprovalRequest,
     ApprovalResult,
     ApprovalToolset,
@@ -25,7 +28,7 @@ class TestApprovalIntegration:
     """Integration tests for approval flow with real agent."""
 
     def test_tool_requires_approval_and_denied(self):
-        """Test that a tool requires approval by default and raises PermissionError when denied."""
+        """Test that a tool requires approval by default and raises ApprovalDenied when denied."""
         approval_requests: list[ApprovalRequest] = []
 
         def deny_callback(request: ApprovalRequest) -> ApprovalDecision:
@@ -51,8 +54,8 @@ class TestApprovalIntegration:
         )
 
         # Configure TestModel to call the delete_file tool
-        # When approval is denied, PermissionError should be raised
-        with pytest.raises(PermissionError) as exc_info:
+        # When approval is denied, ApprovalDenied should be raised
+        with pytest.raises(ApprovalDenied) as exc_info:
             asyncio.run(
                 agent.run(
                     "Delete the file /tmp/test.txt",
@@ -208,6 +211,68 @@ class TestApprovalIntegration:
         assert "Processed" in result.output or "hello" in result.output
 
 
+class AsyncNeedsApprovalToolset(AbstractToolset):
+    """Toolset with async needs_approval for testing."""
+
+    @property
+    def id(self) -> str | None:
+        return "async_needs_approval_toolset"
+
+    async def get_tools(self, ctx: Any) -> dict:
+        return {
+            "ping": {
+                "description": "Ping tool",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        }
+
+    async def call_tool(
+        self, name: str, tool_args: dict[str, Any], ctx: Any, tool: Any
+    ) -> str:
+        if name != "ping":
+            raise ValueError(f"Unknown tool: {name}")
+        return "pong"
+
+    async def needs_approval(
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any] | None = None
+    ) -> ApprovalResult:
+        await asyncio.sleep(0)
+        if name == "ping":
+            return ApprovalResult.pre_approved()
+        return ApprovalResult.needs_approval()
+
+
+class TestAsyncNeedsApproval:
+    """Tests for async needs_approval support."""
+
+    def test_async_needs_approval_pre_approved(self):
+        """Async needs_approval should be awaited and skip the callback."""
+        callback_called = False
+
+        def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
+            nonlocal callback_called
+            callback_called = True
+            return ApprovalDecision(approved=True)
+
+        toolset = AsyncNeedsApprovalToolset()
+        approved_toolset = ApprovalToolset(
+            inner=toolset,
+            approval_callback=should_not_be_called,
+        )
+
+        result = asyncio.run(
+            approved_toolset.call_tool(
+                "ping",
+                {},
+                ctx=None,
+                tool=None,
+            )
+        )
+
+        assert result == "pong"
+        assert not callback_called
+
+
 class ShellToolset(AbstractToolset):
     """Shell toolset with custom needs_approval logic.
 
@@ -276,6 +341,7 @@ class ShellToolset(AbstractToolset):
         Implements SupportsNeedsApproval protocol.
         ctx can be None for testing purposes.
         """
+        self._last_description = None
         # ctx is available for user-specific logic (e.g., ctx.deps)
         tool_config = self.config.get(name, {})
 
@@ -304,7 +370,7 @@ class ShellToolset(AbstractToolset):
             if base_command in {"cat", "head", "tail"} and len(command.split()) > 1:
                 path = command.split()[1]
                 safe_paths = tool_config.get("safe_read_paths", self.SAFE_READ_PATHS)
-                if not any(path.startswith(safe) for safe in safe_paths):
+                if not self._is_safe_read_path(path, safe_paths):
                     self._last_description = f"Read file outside safe paths: {path}"
                     return ApprovalResult.needs_approval()
             return ApprovalResult.pre_approved()
@@ -321,6 +387,36 @@ class ShellToolset(AbstractToolset):
             return self._last_description
         command = tool_args.get("command", "")
         return f"Execute: {command}"
+
+    @staticmethod
+    def _is_safe_read_path(path: str, safe_paths: Iterable[str]) -> bool:
+        candidate = PurePosixPath(path)
+        if not candidate.parts:
+            return False
+
+        if candidate.is_absolute():
+            for safe in safe_paths:
+                if safe == ".":
+                    continue
+                safe_path = PurePosixPath(safe)
+                if not safe_path.is_absolute():
+                    continue
+                if candidate.parts[: len(safe_path.parts)] == safe_path.parts:
+                    return True
+            return False
+
+        if ".." in candidate.parts:
+            return False
+
+        for safe in safe_paths:
+            if safe == ".":
+                return True
+            safe_path = PurePosixPath(safe)
+            if safe_path.is_absolute():
+                continue
+            if candidate.parts[: len(safe_path.parts)] == safe_path.parts:
+                return True
+        return False
 
 
 class TestShellToolsetWithApproval:
@@ -388,6 +484,9 @@ class TestShellToolsetWithApproval:
         assert "/etc/passwd" in desc
 
         result = toolset.needs_approval("shell_exec", {"command": "cat /home/user/.ssh/id_rsa"})
+        assert result.is_needs_approval
+
+        result = toolset.needs_approval("shell_exec", {"command": "cat ../etc/passwd"})
         assert result.is_needs_approval
 
     def test_needs_approval_unknown_commands(self):
@@ -459,7 +558,7 @@ class TestShellToolsetWithApproval:
         assert "rm -rf /tmp/old_files" in shell_toolset._executed_commands
 
     def test_approval_toolset_denies_command(self):
-        """Test ApprovalToolset raises PermissionError when denied."""
+        """Test ApprovalToolset raises ApprovalDenied when denied."""
         shell_toolset = ShellToolset()
         approved_toolset = ApprovalToolset(
             inner=shell_toolset,
@@ -468,7 +567,7 @@ class TestShellToolsetWithApproval:
             ),
         )
 
-        with pytest.raises(PermissionError) as exc_info:
+        with pytest.raises(ApprovalDenied) as exc_info:
             asyncio.run(
                 approved_toolset.call_tool(
                     "shell_exec",
@@ -544,14 +643,14 @@ class TestBlockedOperations:
     """Tests for blocked operations."""
 
     def test_blocked_raises_permission_error(self):
-        """Test that blocked operations raise PermissionError."""
+        """Test that blocked operations raise ApprovalBlocked."""
         toolset = BlockingToolset()
         approved_toolset = ApprovalToolset(
             inner=toolset,
             approval_callback=lambda req: ApprovalDecision(approved=True),
         )
 
-        with pytest.raises(PermissionError) as exc_info:
+        with pytest.raises(ApprovalBlocked) as exc_info:
             asyncio.run(
                 approved_toolset.call_tool(
                     "do_action",
@@ -578,7 +677,7 @@ class TestBlockedOperations:
             approval_callback=should_not_be_called,
         )
 
-        with pytest.raises(PermissionError):
+        with pytest.raises(ApprovalBlocked):
             asyncio.run(
                 approved_toolset.call_tool(
                     "do_action",
@@ -677,7 +776,7 @@ class TestAsyncCallbacks:
             toolsets=[approved_toolset],
         )
 
-        with pytest.raises(PermissionError) as exc_info:
+        with pytest.raises(ApprovalDenied) as exc_info:
             asyncio.run(
                 agent.run(
                     "Delete /tmp/test.txt",

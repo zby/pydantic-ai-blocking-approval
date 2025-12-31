@@ -1,5 +1,9 @@
 """Tests for approval types."""
 
+from dataclasses import FrozenInstanceError
+
+import pytest
+
 from pydantic_ai_blocking_approval import (
     ApprovalDecision,
     ApprovalRequest,
@@ -40,11 +44,8 @@ class TestApprovalResult:
     def test_frozen_dataclass(self):
         """Test that ApprovalResult is immutable."""
         result = ApprovalResult.blocked("reason")
-        try:
+        with pytest.raises(FrozenInstanceError):
             result.status = "pre_approved"  # type: ignore
-            assert False, "Should have raised FrozenInstanceError"
-        except Exception:
-            pass  # Expected
 
 
 class TestApprovalRequest:

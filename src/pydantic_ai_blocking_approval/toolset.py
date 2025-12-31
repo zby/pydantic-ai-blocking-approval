@@ -14,7 +14,9 @@ from pydantic_ai.toolsets import AbstractToolset
 
 from .types import (
     ApprovalCallback,
+    ApprovalBlocked,
     ApprovalDecision,
+    ApprovalDenied,
     ApprovalRequest,
     ApprovalResult,
     SupportsApprovalDescription,
@@ -100,12 +102,17 @@ class ApprovalToolset(AbstractToolset):
         """Delegate to inner toolset's get_tools."""
         return await self._inner.get_tools(ctx)
 
-    def _get_approval_result(
+    async def _get_approval_result(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
     ) -> ApprovalResult:
         """Get approval result from inner toolset or config."""
         if isinstance(self._inner, SupportsNeedsApproval):
-            return self._inner.needs_approval(name, tool_args, ctx)
+            result = self._inner.needs_approval(name, tool_args, ctx)
+            if inspect.isawaitable(result):
+                result = await result
+            if not isinstance(result, ApprovalResult):
+                raise TypeError("needs_approval must return ApprovalResult")
+            return result
 
         # Config-based fallback (secure by default)
         tool_config = self.config.get(name, {})
@@ -143,9 +150,7 @@ class ApprovalToolset(AbstractToolset):
         decision = await self._resolve_approval(request)
 
         if not decision.approved:
-            raise PermissionError(
-                f"User denied {name}: {decision.note or 'no reason given'}"
-            )
+            raise ApprovalDenied(name, decision)
 
     async def call_tool(
         self,
@@ -155,10 +160,10 @@ class ApprovalToolset(AbstractToolset):
         tool: Any,
     ) -> Any:
         """Intercept tool calls for approval checking."""
-        result = self._get_approval_result(name, tool_args, ctx)
+        result = await self._get_approval_result(name, tool_args, ctx)
 
         if result.is_blocked:
-            raise PermissionError(result.block_reason)
+            raise ApprovalBlocked(name, result.block_reason)
 
         if result.is_needs_approval:
             description = self._get_description(name, tool_args, ctx)

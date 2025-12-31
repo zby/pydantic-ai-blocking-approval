@@ -30,6 +30,12 @@ class ApprovalResult:
     status: Literal["blocked", "pre_approved", "needs_approval"]
     block_reason: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        if self.status == "blocked" and self.block_reason is None:
+            raise ValueError("blocked ApprovalResult requires block_reason")
+        if self.status != "blocked" and self.block_reason is not None:
+            raise ValueError("block_reason is only valid for blocked status")
+
     @classmethod
     def blocked(cls, reason: str) -> "ApprovalResult":
         """Operation is forbidden by policy."""
@@ -77,7 +83,7 @@ class SupportsNeedsApproval(Protocol):
 
     def needs_approval(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
-    ) -> ApprovalResult:
+    ) -> ApprovalResult | Awaitable[ApprovalResult]:
         """Determine approval status for a tool call.
 
         Args:
@@ -149,6 +155,32 @@ class ApprovalDecision(BaseModel):
     approved: bool
     note: Optional[str] = None
     remember: Literal["none", "session"] = "none"
+
+
+class ApprovalError(PermissionError):
+    """Base exception for approval-related failures."""
+
+    def __init__(self, tool_name: str, message: str) -> None:
+        super().__init__(message)
+        self.tool_name = tool_name
+
+
+class ApprovalDenied(ApprovalError):
+    """Exception raised when a user denies a tool call."""
+
+    def __init__(self, tool_name: str, decision: "ApprovalDecision") -> None:
+        note = decision.note or "no reason given"
+        super().__init__(tool_name, f"Approval denied for {tool_name}: {note}")
+        self.decision = decision
+
+
+class ApprovalBlocked(ApprovalError):
+    """Exception raised when a tool call is blocked by policy."""
+
+    def __init__(self, tool_name: str, reason: Optional[str]) -> None:
+        message = reason or "blocked by policy"
+        super().__init__(tool_name, f"Blocked {tool_name}: {message}")
+        self.reason = reason
 
 
 def ensure_decision(result: Any) -> "ApprovalDecision":

@@ -74,6 +74,17 @@ Detection uses `inspect.isawaitable()` on the callback result, so any awaitable 
 
 The library provides `tool_name`, `tool_args`, and `description`. The CLI decides how to render (diffs, syntax highlighting, truncation).
 
+### 8. Exceptions for denied/blocked tools
+
+When a tool is denied or blocked, `ApprovalToolset` raises an exception (`ApprovalDenied` or `ApprovalBlocked`) rather than returning an error value. This design choice keeps the wrapped tool unaware of the approval mechanism:
+
+- `ApprovalToolset` acts as a wrapper that intercepts `call_tool()`
+- It handles user interaction and only proceeds to the actual tool if approval is granted
+- If denied, an exception provides a clean, Pythonic non-local exit from the wrapper
+- The inner tool's code remains unchanged—no approval-related conditionals or return types
+
+This separation means you can wrap any existing toolset without modifying it.
+
 ## Architecture
 
 ```

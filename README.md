@@ -138,7 +138,7 @@ ApprovalToolset (unified wrapper)
 
 **How it works:** `ApprovalToolset` automatically detects whether your inner toolset implements the `SupportsNeedsApproval` protocol. If it does, approval decisions are delegated to `inner.needs_approval()` which returns an `ApprovalResult` (blocked, pre_approved, or needs_approval). Otherwise, it falls back to config-based approval (secure by default).
 
-**Note on async:** The toolset methods are `async` because PydanticAI's `AbstractToolset` interface requires it. The "blocking" refers to the `approval_callback` — a synchronous function that blocks the coroutine until the user decides. So `async def call_tool()` awaits the inner toolset, but the approval prompt in the middle is synchronous and blocking.
+**Note on async:** The toolset methods are `async` because PydanticAI's `AbstractToolset` interface requires it. The "blocking" refers to the `approval_callback` — a synchronous function that blocks the coroutine until the user decides. `needs_approval()` may be sync or async; if it returns an awaitable, `ApprovalToolset` awaits it. So `async def call_tool()` awaits the inner toolset, but the approval prompt in the middle is synchronous and blocking.
 
 ## Installation
 
@@ -183,7 +183,7 @@ The approval callback returns an `ApprovalDecision`, which includes:
 - `note`: optional reason for the LLM/user
 - `remember`: optional hint for caller-managed session caching
 
-Returning a bare `bool` is rejected.
+Returning a bare `bool` is rejected. Denied calls raise `ApprovalDenied` (with the `ApprovalDecision` attached), and policy blocks raise `ApprovalBlocked`.
 
 Session caching, approval scopes ("approve all file reads"), undo/redo, audit logging—these all require state management that varies wildly by use case:
 
@@ -342,6 +342,12 @@ or custom serializers for non-JSON tool args).
 - `ApprovalCallback` - Approval callback signature (sync/async decision)
 - `SupportsNeedsApproval` - Protocol for toolsets with custom approval logic
 - `SupportsApprovalDescription` - Protocol for custom approval descriptions
+
+### Exceptions
+
+- `ApprovalError` - Base exception for approval failures (subclasses `PermissionError`)
+- `ApprovalDenied` - Raised when a user denies a tool call (contains `decision`)
+- `ApprovalBlocked` - Raised when a tool call is blocked by policy (contains `reason`)
 
 ### Classes
 

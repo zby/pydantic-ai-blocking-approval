@@ -8,6 +8,9 @@ Key Components:
     - ApprovalResult: Structured result from approval checking (blocked/pre_approved/needs_approval)
     - ApprovalRequest: Returned by tools when approval is needed
     - ApprovalDecision: User's decision (approved, note, remember hint)
+    - ApprovalError: Base exception for approval failures
+    - ApprovalDenied: Exception raised when a tool call is denied
+    - ApprovalBlocked: Exception raised when a tool call is blocked by policy
     - ApprovalToolset: Unified wrapper (auto-detects inner toolset capabilities)
     - SupportsNeedsApproval: Protocol for toolsets with custom approval logic
     - SupportsApprovalDescription: Protocol for custom approval descriptions
@@ -69,7 +72,10 @@ For testing, use approve-all or strict callbacks:
 from .toolset import ApprovalToolset
 from .types import (
     ApprovalCallback,
+    ApprovalBlocked,
     ApprovalDecision,
+    ApprovalDenied,
+    ApprovalError,
     ApprovalRequest,
     ApprovalResult,
     SupportsApprovalDescription,
@@ -80,7 +86,10 @@ __version__ = "0.9.0"
 
 __all__ = [
     "ApprovalCallback",
+    "ApprovalBlocked",
     "ApprovalDecision",
+    "ApprovalDenied",
+    "ApprovalError",
     "ApprovalRequest",
     "ApprovalResult",
     "ApprovalToolset",
