@@ -12,7 +12,6 @@ from typing import Any, Optional
 from pydantic_ai import RunContext
 from pydantic_ai.toolsets import AbstractToolset
 
-from .memory import ApprovalMemory
 from .types import (
     ApprovalCallback,
     ApprovalDecision,
@@ -20,6 +19,7 @@ from .types import (
     ApprovalResult,
     SupportsApprovalDescription,
     SupportsNeedsApproval,
+    ensure_decision,
 )
 
 
@@ -59,13 +59,16 @@ class ApprovalToolset(AbstractToolset):
             inner=MyToolset(),
             approval_callback=my_callback,
         )
+
+    Session caching (if desired) should be handled by the caller by wrapping
+    the approval callback.
+
     """
 
     def __init__(
         self,
         inner: AbstractToolset,
         approval_callback: ApprovalCallback,
-        memory: Optional[ApprovalMemory] = None,
         config: Optional[dict[str, dict[str, Any]]] = None,
     ):
         """Initialize the approval wrapper.
@@ -75,14 +78,13 @@ class ApprovalToolset(AbstractToolset):
             approval_callback: Callback to request user approval. Can be sync or async.
                 Sync callbacks block until decision is made.
                 Async callbacks can await external approval (e.g., from web UI).
-            memory: Session cache for "approve for session" (created if None)
+                Must return an ApprovalDecision.
             config: Per-tool configuration dict. Each key is a tool name, value is
                 a dict with optional "pre_approved": True to skip approval.
                 Only used when inner doesn't implement SupportsNeedsApproval.
         """
         self._inner = inner
         self._approval_callback = approval_callback
-        self._memory = memory or ApprovalMemory()
         self.config = config or {}
 
     @property
@@ -122,33 +124,23 @@ class ApprovalToolset(AbstractToolset):
         args_str = ", ".join(f"{k}={v!r}" for k, v in tool_args.items())
         return f"{name}({args_str})"
 
+    async def _resolve_approval(self, request: ApprovalRequest) -> ApprovalDecision:
+        """Resolve an approval decision from the callback."""
+        result = self._approval_callback(request)
+        if inspect.isawaitable(result):
+            return ensure_decision(await result)
+        return ensure_decision(result)
+
     async def _prompt_for_approval(
         self, name: str, tool_args: dict[str, Any], description: str
     ) -> None:
-        """Prompt user for approval. Raises PermissionError if denied.
-
-        Supports both sync and async approval callbacks. Sync callbacks are
-        called directly; async callbacks are awaited.
-        """
-        # Check session cache first
-        cached = self._memory.lookup(name, tool_args)
-        if cached is not None and cached.approved:
-            return
-
+        """Prompt user for approval. Raises PermissionError if denied."""
         request = ApprovalRequest(
             tool_name=name,
             tool_args=tool_args,
             description=description,
         )
-
-        # Handle both sync and async callbacks
-        result = self._approval_callback(request)
-        if inspect.isawaitable(result):
-            decision = await result
-        else:
-            decision = result
-
-        self._memory.store(name, tool_args, decision)
+        decision = await self._resolve_approval(request)
 
         if not decision.approved:
             raise PermissionError(

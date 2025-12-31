@@ -2,7 +2,7 @@
 
 Synchronous, blocking approval system for PydanticAI agent tools.
 
-> **Status**: This package is experimental. The core wrapper (`ApprovalToolset`, `ApprovalController`) is more mature, while pattern-based approval via `needs_approval()` is highly experimental and likely to change. See [design motivation](docs/notes/design_motivation.md) for details.
+> **Status**: This package is experimental. The core wrapper (`ApprovalToolset`) is more mature, while pattern-based approval via `needs_approval()` is highly experimental and likely to change. See [design motivation](docs/notes/design_motivation.md) for details.
 
 ## Why This Package?
 
@@ -132,14 +132,8 @@ ApprovalToolset (unified wrapper)
     │   ├── blocked → raises PermissionError
     │   ├── pre_approved → proceeds without prompting
     │   └── needs_approval → prompts user
-    ├── consults ApprovalMemory for cached decisions
     ├── calls approval_callback and BLOCKS until user decides
     └── proceeds or raises PermissionError
-
-ApprovalController (manages modes)
-    ├── interactive — prompts user via callback
-    ├── approve_all — auto-approve (testing)
-    └── strict — auto-deny (safety)
 ```
 
 **How it works:** `ApprovalToolset` automatically detects whether your inner toolset implements the `SupportsNeedsApproval` protocol. If it does, approval decisions are delegated to `inner.needs_approval()` which returns an `ApprovalResult` (blocked, pre_approved, or needs_approval). Otherwise, it falls back to config-based approval (secure by default).
@@ -157,7 +151,6 @@ pip install pydantic-ai-blocking-approval
 ```python
 from pydantic_ai import Agent
 from pydantic_ai_blocking_approval import (
-    ApprovalController,
     ApprovalDecision,
     ApprovalRequest,
     ApprovalToolset,
@@ -166,17 +159,13 @@ from pydantic_ai_blocking_approval import (
 # Create a callback for interactive approval
 def my_approval_callback(request: ApprovalRequest) -> ApprovalDecision:
     print(f"Approve {request.tool_name}? {request.description}")
-    response = input("[y/n/s(ession)]: ")
-    if response == "s":
-        return ApprovalDecision(approved=True, remember="session")
+    response = input("[y/n]: ")
     return ApprovalDecision(approved=response.lower() == "y")
 
 # Wrap your toolset with approval using per-tool config
-controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
 approved_toolset = ApprovalToolset(
     inner=my_toolset,
-    approval_callback=controller.approval_callback,
-    memory=controller.memory,
+    approval_callback=my_approval_callback,
     config={
         "safe_tool": {"pre_approved": True},
         # All other tools require approval (secure by default)
@@ -187,22 +176,34 @@ approved_toolset = ApprovalToolset(
 agent = Agent(..., toolsets=[approved_toolset])
 ```
 
-## Approval Modes
+## Callback Returns ApprovalDecision
 
-The `ApprovalController` supports three modes:
+The approval callback returns an `ApprovalDecision`, which includes:
+- `approved`: allow/deny
+- `note`: optional reason for the LLM/user
+- `remember`: optional hint for caller-managed session caching
 
-| Mode | Behavior | Use Case |
-|------|----------|----------|
-| `interactive` | Prompts user via callback | CLI with user present |
-| `approve_all` | Auto-approves all requests | Testing, CI |
-| `strict` | Auto-denies all requests | Production safety |
+Returning a bare `bool` is rejected.
+
+Session caching, approval scopes ("approve all file reads"), undo/redo, audit logging—these all require state management that varies wildly by use case:
+
+- CLI tools might cache approvals in memory for the session
+- Web apps might persist them in a database with user scopes
+- Slack bots might track approvals per channel or thread
+- Desktop apps might integrate with OS keychain
+
+There's no universal abstraction for "session" or "scope" that works across these contexts. Rather than provide a leaky abstraction, this package gives you a minimal decision type (`ApprovalDecision`) and lets you build the state management that fits your domain.
+
+### Example Patterns
 
 ```python
-# For testing - auto-approve everything
-controller = ApprovalController(mode="approve_all")
+# Auto-approve everything (tests/CI)
+def approve_all(_: ApprovalRequest) -> ApprovalDecision:
+    return ApprovalDecision(approved=True)
 
-# For CI/production - reject all approval-required operations
-controller = ApprovalController(mode="strict")
+# Auto-deny everything (strict safety)
+def deny_all(_: ApprovalRequest) -> ApprovalDecision:
+    return ApprovalDecision(approved=False, note="Strict mode")
 ```
 
 ## Integration Patterns
@@ -277,20 +278,59 @@ approved = ApprovalToolset(
 )
 ```
 
-## Session Approval Caching
+## Session Approval Caching (Caller-Side)
 
-When users approve with `remember="session"`, subsequent identical requests are auto-approved:
+Session caching is intentionally not built into this package. If you want
+approve-for-session behavior, implement it in your callback wrapper:
 
 ```python
-# First call - prompts user
-# User selects "approve for session"
-decision = ApprovalDecision(approved=True, remember="session")
+import json
 
-# Subsequent identical calls - auto-approved from cache
-# (same tool_name + tool_args)
+from pydantic_ai_blocking_approval import (
+    ApprovalDecision,
+    ApprovalRequest,
+    ApprovalToolset,
+)
+
+def prompt_user(request: ApprovalRequest) -> str:
+    return input(
+        f"Approve {request.tool_name}? [y]es / [n]o / [s]ession: "
+    ).strip().lower()
+
+def with_session_cache(prompt):
+    cache = {}
+
+    def wrapper(request: ApprovalRequest) -> ApprovalDecision:
+        key = (
+            request.tool_name,
+            json.dumps(request.tool_args, sort_keys=True, default=str),
+        )
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+
+        response = prompt(request)
+        if response == "s":
+            decision = ApprovalDecision(approved=True, remember="session")
+        elif response == "y":
+            decision = ApprovalDecision(approved=True)
+        else:
+            decision = ApprovalDecision(approved=False, note="User denied")
+
+        if decision.approved and decision.remember == "session":
+            cache[key] = decision
+        return decision
+
+    return wrapper
+
+approved_toolset = ApprovalToolset(
+    inner=my_toolset,
+    approval_callback=with_session_cache(prompt_user),
+)
 ```
 
-The cache key is `(tool_name, tool_args)`.
+Choose a keying strategy that matches your domain (e.g., stable JSON, hashing,
+or custom serializers for non-JSON tool args).
 
 ## API Reference
 
@@ -299,14 +339,13 @@ The cache key is `(tool_name, tool_args)`.
 - `ApprovalResult` - Structured result from approval checking (blocked/pre_approved/needs_approval)
 - `ApprovalRequest` - Request object when approval is needed
 - `ApprovalDecision` - User's decision (approved, note, remember)
+- `ApprovalCallback` - Approval callback signature (sync/async decision)
 - `SupportsNeedsApproval` - Protocol for toolsets with custom approval logic
 - `SupportsApprovalDescription` - Protocol for custom approval descriptions
 
 ### Classes
 
-- `ApprovalMemory` - Session cache for "approve for session"
 - `ApprovalToolset` - Unified wrapper (auto-detects inner toolset capabilities)
-- `ApprovalController` - Mode-based controller
 
 ## License
 

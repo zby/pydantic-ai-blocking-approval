@@ -12,10 +12,10 @@ Both can achieve the same result. This note compares them.
 ## Current Design: Callbacks
 
 ```python
+from pydantic_ai_blocking_approval import ApprovalDecision, ApprovalToolset
+
 def my_prompt(request: ApprovalRequest) -> ApprovalDecision:
-    response = input(f"Approve {request.tool_name}? [y/n/s]: ")
-    if response == "s":
-        return ApprovalDecision(approved=True, remember="session")
+    response = input(f"Approve {request.tool_name}? [y/n]: ")
     return ApprovalDecision(approved=response == "y")
 
 toolset = ApprovalToolset(
@@ -26,8 +26,6 @@ toolset = ApprovalToolset(
 
 The framework handles everything except the prompt itself:
 - Checking `needs_approval()`
-- Looking up session cache
-- Storing decisions when `remember="session"`
 
 The callback only implements the user interaction.
 
@@ -36,15 +34,15 @@ The callback only implements the user interaction.
 ```python
 class MyApprovalToolset(MethodApprovalToolset):
     async def prompt_for_approval(self, request: ApprovalRequest) -> ApprovalDecision:
-        response = input(f"Approve {request.tool_name}? [y/n/s]: ")
-        if response == "s":
-            return ApprovalDecision(approved=True, remember="session")
+        response = input(f"Approve {request.tool_name}? [y/n]: ")
         return ApprovalDecision(approved=response == "y")
 
 toolset = MyApprovalToolset(inner=my_toolset)
 ```
 
-Same separation of concerns - subclass only implements the prompt, parent handles the rest.
+Same separation of concerns - subclass only implements the prompt; the parent can
+handle the rest. Session caching (if desired) is caller-side and can be added by
+wrapping the prompt callback.
 
 ## Comparison
 

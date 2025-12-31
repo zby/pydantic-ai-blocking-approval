@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2025-12-12
+
+### Changed
+
+- Approval callbacks must return `ApprovalDecision` (bool is not accepted)
+- Session caching is no longer provided by this package; implement it in the
+  caller (example in README)
+- `ApprovalController` removed; encode approve-all/strict behavior in callbacks
+- Session caching is no longer provided by this package; implement it in the
+  caller (example in README)
+
 ## [0.8.0] - 2025-12-11
 
 ### Added

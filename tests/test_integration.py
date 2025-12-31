@@ -10,9 +10,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.toolsets.abstract import AbstractToolset
 
 from pydantic_ai_blocking_approval import (
-    ApprovalController,
     ApprovalDecision,
-    ApprovalMemory,
     ApprovalRequest,
     ApprovalResult,
     ApprovalToolset,
@@ -66,7 +64,7 @@ class TestApprovalIntegration:
         assert len(approval_requests) == 1
         assert approval_requests[0].tool_name == "delete_file"
 
-        # The exception message should contain the denial note
+        # The exception message should indicate denial
         assert "User denied" in str(exc_info.value)
 
     def test_tool_requires_approval_and_approved(self):
@@ -107,19 +105,20 @@ class TestApprovalIntegration:
         # The tool should have executed successfully
         assert "Email sent" in result.output or "success" in result.output.lower()
 
-    def test_controller_approve_all_mode(self):
-        """Test that approve_all mode auto-approves without prompting."""
-        controller = ApprovalController(mode="approve_all")
+    def test_tool_bool_callback_raises(self):
+        """Test that a bool callback raises TypeError."""
 
-        def dangerous_action() -> str:
-            """Do something dangerous."""
-            return "Action completed"
+        def approve_all(request: ApprovalRequest) -> bool:
+            return True
 
-        inner_toolset = FunctionToolset([dangerous_action])
+        def send_email(to: str, subject: str) -> str:
+            """Send an email."""
+            return f"Email sent to {to} with subject: {subject}"
+
+        inner_toolset = FunctionToolset([send_email])
         approved_toolset = ApprovalToolset(
             inner=inner_toolset,
-            approval_callback=controller.approval_callback,
-            memory=controller.memory,
+            approval_callback=approve_all,
         )
 
         agent = Agent(
@@ -127,47 +126,13 @@ class TestApprovalIntegration:
             toolsets=[approved_toolset],
         )
 
-        result = asyncio.run(
-            agent.run(
-                "Do the dangerous action",
-                model=TestModel(call_tools=["dangerous_action"]),
-            )
-        )
-
-        # Should succeed without any prompting
-        assert "Action completed" in result.output or "success" in result.output.lower()
-
-    def test_controller_strict_mode(self):
-        """Test that strict mode auto-denies all requests with PermissionError."""
-        controller = ApprovalController(mode="strict")
-
-        def write_file(path: str, content: str) -> str:
-            """Write content to a file."""
-            return f"Wrote to {path}"
-
-        inner_toolset = FunctionToolset([write_file])
-        approved_toolset = ApprovalToolset(
-            inner=inner_toolset,
-            approval_callback=controller.approval_callback,
-            memory=controller.memory,
-        )
-
-        agent = Agent(
-            model=TestModel(),
-            toolsets=[approved_toolset],
-        )
-
-        # Strict mode should raise PermissionError
-        with pytest.raises(PermissionError) as exc_info:
+        with pytest.raises(TypeError, match="ApprovalDecision"):
             asyncio.run(
                 agent.run(
-                    "Write 'hello' to /tmp/test.txt",
-                    model=TestModel(call_tools=["write_file"]),
+                    "Send email to test@example.com about Meeting",
+                    model=TestModel(call_tools=["send_email"]),
                 )
             )
-
-        # Should mention strict mode in the error
-        assert "Strict mode" in str(exc_info.value)
 
     def test_tool_without_config_requires_approval(self):
         """Test that tools without config require approval by default (secure by default)."""
@@ -516,56 +481,6 @@ class TestShellToolsetWithApproval:
         assert "Too dangerous" in str(exc_info.value)
         assert len(shell_toolset._executed_commands) == 0  # Never executed
 
-    def test_session_caching_for_commands(self):
-        """Test session approval caching works with command-based args."""
-        approval_count = 0
-        memory = ApprovalMemory()
-
-        def approve_for_session(request: ApprovalRequest) -> ApprovalDecision:
-            nonlocal approval_count
-            approval_count += 1
-            return ApprovalDecision(approved=True, remember="session")
-
-        shell_toolset = ShellToolset()
-        approved_toolset = ApprovalToolset(
-            inner=shell_toolset,
-            approval_callback=approve_for_session,
-            memory=memory,
-        )
-
-        # First call - should prompt
-        asyncio.run(
-            approved_toolset.call_tool(
-                "shell_exec",
-                {"command": "rm /tmp/file1.txt"},
-                ctx=None,
-                tool=None,
-            )
-        )
-        assert approval_count == 1
-
-        # Second call with same command - should use cached approval
-        asyncio.run(
-            approved_toolset.call_tool(
-                "shell_exec",
-                {"command": "rm /tmp/file1.txt"},
-                ctx=None,
-                tool=None,
-            )
-        )
-        assert approval_count == 1  # Still 1, used cache
-
-        # Third call with different command - should prompt again
-        asyncio.run(
-            approved_toolset.call_tool(
-                "shell_exec",
-                {"command": "rm /tmp/file2.txt"},
-                ctx=None,
-                tool=None,
-            )
-        )
-        assert approval_count == 2  # Now 2, different command
-
     def test_unknown_tool_requires_approval(self):
         """Test that unknown tools require approval."""
         toolset = ShellToolset()
@@ -771,113 +686,6 @@ class TestAsyncCallbacks:
             )
 
         assert "Denied by async callback" in str(exc_info.value)
-
-    def test_async_callback_with_session_cache(self):
-        """Test that async callbacks work with session caching."""
-        callback_count = 0
-
-        async def async_approve_with_session(request: ApprovalRequest) -> ApprovalDecision:
-            nonlocal callback_count
-            await asyncio.sleep(0.01)
-            callback_count += 1
-            return ApprovalDecision(approved=True, remember="session")
-
-        def list_files(path: str) -> str:
-            """List files in a directory."""
-            return f"Files in {path}"
-
-        inner_toolset = FunctionToolset([list_files])
-        memory = ApprovalMemory()
-        approved_toolset = ApprovalToolset(
-            inner=inner_toolset,
-            approval_callback=async_approve_with_session,
-            memory=memory,
-        )
-
-        agent = Agent(
-            model=TestModel(),
-            toolsets=[approved_toolset],
-        )
-
-        # First call - should invoke async callback
-        asyncio.run(
-            agent.run(
-                "List files in /tmp",
-                model=TestModel(call_tools=["list_files"]),
-            )
-        )
-
-        # Second call with same args - should use cache
-        asyncio.run(
-            agent.run(
-                "List files in /tmp",
-                model=TestModel(call_tools=["list_files"]),
-            )
-        )
-
-        # Callback should only be called once (second call uses cache)
-        assert callback_count == 1
-
-    def test_controller_request_approval(self):
-        """Test ApprovalController.request_approval method."""
-        async def async_callback(request: ApprovalRequest) -> ApprovalDecision:
-            await asyncio.sleep(0.01)
-            return ApprovalDecision(approved=True, remember="session")
-
-        controller = ApprovalController(
-            mode="interactive",
-            approval_callback=async_callback,
-        )
-
-        request = ApprovalRequest(
-            tool_name="test_tool",
-            tool_args={"arg": "value"},
-            description="Test tool call",
-        )
-
-        async def test_async():
-            decision = await controller.request_approval(request)
-            assert decision.approved
-            assert decision.remember == "session"
-
-            # Second call should use cache
-            decision2 = await controller.request_approval(request)
-            assert decision2.approved
-
-        asyncio.run(test_async())
-
-    def test_controller_request_approval_approve_all_mode(self):
-        """Test request_approval in approve_all mode."""
-        controller = ApprovalController(mode="approve_all")
-
-        request = ApprovalRequest(
-            tool_name="any_tool",
-            tool_args={},
-            description="Any operation",
-        )
-
-        async def test_async():
-            decision = await controller.request_approval(request)
-            assert decision.approved
-
-        asyncio.run(test_async())
-
-    def test_controller_request_approval_strict_mode(self):
-        """Test request_approval in strict mode."""
-        controller = ApprovalController(mode="strict")
-
-        request = ApprovalRequest(
-            tool_name="any_tool",
-            tool_args={},
-            description="Any operation",
-        )
-
-        async def test_async():
-            decision = await controller.request_approval(request)
-            assert not decision.approved
-            assert "Strict mode" in decision.note
-
-        asyncio.run(test_async())
 
     def test_mixed_sync_callback_with_async_toolset(self):
         """Test that sync callbacks still work with the async-capable toolset."""

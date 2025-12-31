@@ -7,10 +7,8 @@ Supports both synchronous blocking callbacks (for CLI) and asynchronous callback
 Key Components:
     - ApprovalResult: Structured result from approval checking (blocked/pre_approved/needs_approval)
     - ApprovalRequest: Returned by tools when approval is needed
-    - ApprovalDecision: User's decision (approved, remember for session)
-    - ApprovalMemory: Session cache for "approve for session" functionality
+    - ApprovalDecision: User's decision (approved, note, remember hint)
     - ApprovalToolset: Unified wrapper (auto-detects inner toolset capabilities)
-    - ApprovalController: Mode-based controller (interactive/approve_all/strict)
     - SupportsNeedsApproval: Protocol for toolsets with custom approval logic
     - SupportsApprovalDescription: Protocol for custom approval descriptions
     - ApprovalCallback: Type alias for sync/async approval callbacks
@@ -18,7 +16,6 @@ Key Components:
 Example with config (simple inner toolset):
     from pydantic_ai import Agent
     from pydantic_ai_blocking_approval import (
-        ApprovalController,
         ApprovalDecision,
         ApprovalRequest,
         ApprovalToolset,
@@ -27,17 +24,13 @@ Example with config (simple inner toolset):
     # Create a callback for interactive approval
     def my_approval_callback(request: ApprovalRequest) -> ApprovalDecision:
         print(f"Approve {request.tool_name}? {request.description}")
-        response = input("[y/n/s(ession)]: ")
-        if response == "s":
-            return ApprovalDecision(approved=True, remember="session")
+        response = input("[y/n]: ")
         return ApprovalDecision(approved=response.lower() == "y")
 
     # Wrap your toolset with config-based approval
-    controller = ApprovalController(mode="interactive", approval_callback=my_approval_callback)
     approved_toolset = ApprovalToolset(
         inner=my_toolset,
-        approval_callback=controller.approval_callback,
-        memory=controller.memory,
+        approval_callback=my_approval_callback,
         config={
             "safe_tool": {"pre_approved": True},
             # All other tools require approval (secure by default)
@@ -65,13 +58,14 @@ Example with smart inner toolset (implements SupportsNeedsApproval):
     # ApprovalToolset auto-detects needs_approval and delegates to it
     approved = ApprovalToolset(inner=MyToolset(), approval_callback=my_callback)
 
-For testing, use approve_all or strict modes:
-    controller = ApprovalController(mode="approve_all")  # Auto-approve
-    controller = ApprovalController(mode="strict")       # Auto-deny
+For testing, use approve-all or strict callbacks:
+    def approve_all(_: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(approved=True)
+
+    def deny_all(_: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(approved=False, note="Strict mode")
 """
 
-from .controller import ApprovalController
-from .memory import ApprovalMemory
 from .toolset import ApprovalToolset
 from .types import (
     ApprovalCallback,
@@ -82,13 +76,11 @@ from .types import (
     SupportsNeedsApproval,
 )
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 __all__ = [
     "ApprovalCallback",
-    "ApprovalController",
     "ApprovalDecision",
-    "ApprovalMemory",
     "ApprovalRequest",
     "ApprovalResult",
     "ApprovalToolset",

@@ -21,6 +21,12 @@ Instead of overloaded `bool | dict`, we use structured states:
 
 Description generation is separate (`SupportsApprovalDescription` protocol), called only when approval is needed.
 
+### 1.5 `ApprovalDecision` is structured (bool is not enough)
+
+The approval callback returns `ApprovalDecision` because a bare boolean
+cannot carry context back to the LLM/operator. `note` lets denials (or approvals)
+explain why, and `remember` can signal caller-managed session caching.
+
 ### 2. Unified wrapper with protocol detection
 
 A single `ApprovalToolset` auto-detects capabilities:
@@ -33,17 +39,17 @@ Simple case uses config; complex case (e.g., shell command analysis) implements 
 
 Tools require approval unless explicitly pre-approved. Forgetting to add a safe tool = minor inconvenience. Forgetting to restrict a dangerous tool = no security breach.
 
-### 4. Controller with modes
+### 4. Callback patterns (optional controller)
 
-| Mode | Behavior | Use Case |
-|------|----------|----------|
-| `interactive` | Prompt user | CLI with operator present |
-| `approve_all` | Auto-approve | Tests, trusted dev |
-| `strict` | Auto-deny | CI, production |
+Environment-specific behavior can be encoded directly in the callback:
+- Approve-all: return `ApprovalDecision(approved=True)`
+- Strict deny: return `ApprovalDecision(approved=False, note="Strict mode")`
 
 ### 5. Session caching
 
-Approving 100 similar operations one-by-one is tedious. With `remember="session"`, the first approval covers subsequent identical calls. Cache key is `(tool_name, tool_args)`.
+Approving 100 similar operations one-by-one is tedious. This package does not
+implement caching; if you want it, wrap your callback to store decisions keyed
+on `(tool_name, tool_args)` (or a canonicalized variant).
 
 ### 6. Sync and async callbacks
 
@@ -75,14 +81,7 @@ The library provides `tool_name`, `tool_args`, and `description`. The CLI decide
 │                        CLI / UI Layer                       │
 │  • Rendering, keyboard/mouse input                          │
 │  • Provides sync or async approval_callback                 │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   ApprovalController                        │
-│  • Mode selection (interactive/approve_all/strict)          │
-│  • Owns ApprovalMemory for session caching                  │
-│  • request_approval() handles both sync/async callbacks     │
+│  • Implements user prompting and mode behavior             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -91,7 +90,7 @@ The library provides `tool_name`, `tool_args`, and `description`. The CLI decide
 │  • Wraps any AbstractToolset                                │
 │  • Auto-detects SupportsNeedsApproval protocol              │
 │  • Handles ApprovalResult states                            │
-│  • Consults cache, calls callback, handles decision         │
+│  • Calls callback, handles decision                         │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -103,6 +102,9 @@ The library provides `tool_name`, `tool_args`, and `description`. The CLI decide
 └─────────────────────────────────────────────────────────────┘
 ```
 
+Session caching belongs at the caller layer so hosts can define the keying and
+scope rules that make sense for their app.
+
 ## Incremental Adoption
 
 Start simple, add complexity as needed:
@@ -110,5 +112,5 @@ Start simple, add complexity as needed:
 1. **Basic**: `ApprovalToolset` + config dict for pre-approved tools
 2. **Custom logic**: Inner toolset implements `SupportsNeedsApproval`
 3. **Custom descriptions**: Add `SupportsApprovalDescription`
-4. **Modes**: Use `ApprovalController` for environment-specific behavior
+4. **Callbacks**: Encode approve-all/strict behavior in the callback
 5. **Async UI**: Switch to async callback

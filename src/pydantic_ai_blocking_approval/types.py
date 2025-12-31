@@ -125,7 +125,7 @@ class ApprovalRequest(BaseModel):
 
     Attributes:
         tool_name: Name of the tool requesting approval
-        tool_args: Arguments passed to the tool (used for display and session cache matching)
+        tool_args: Arguments passed to the tool (used for display and caller-side caching)
         description: Human-readable description of what the tool wants to do
     """
 
@@ -143,7 +143,7 @@ class ApprovalDecision(BaseModel):
     Attributes:
         approved: Whether the operation should proceed
         note: Optional reason for rejection or comment
-        remember: Whether to cache this decision for the session
+        remember: Optional hint for caller-managed session caching
     """
 
     approved: bool
@@ -151,7 +151,14 @@ class ApprovalDecision(BaseModel):
     remember: Literal["none", "session"] = "none"
 
 
-# Type alias for approval callbacks - supports both sync and async
+def ensure_decision(result: Any) -> "ApprovalDecision":
+    """Ensure callback results are ApprovalDecision."""
+    if isinstance(result, ApprovalDecision):
+        return result
+    raise TypeError("approval_callback must return ApprovalDecision")
+
+
+# Type alias for approval callbacks - supports both sync/async decisions
 ApprovalCallback = Callable[
     ["ApprovalRequest"],
     Union["ApprovalDecision", Awaitable["ApprovalDecision"]]
