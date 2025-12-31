@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2025-12-31
+
 ### Added
 
 - `ApprovalConfig` type alias for per-tool config mappings
@@ -14,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Approval callbacks must return `ApprovalDecision` (bool is not accepted)
+- Session caching is no longer provided by this package; implement it in the
+  caller (example in README)
+- `ApprovalController` removed; encode approve-all/strict behavior in callbacks
 - **BREAKING**: `SupportsNeedsApproval.needs_approval()` now receives the toolset
   config passed through from `ApprovalToolset`
 - `ApprovalToolset` always passes config into custom `needs_approval` implementations
@@ -33,17 +39,6 @@ def needs_approval(self, name, tool_args, ctx, config):
     # ...custom logic...
     return ApprovalResult.needs_approval()
 ```
-
-## [0.9.0] - 2025-12-12
-
-### Changed
-
-- Approval callbacks must return `ApprovalDecision` (bool is not accepted)
-- Session caching is no longer provided by this package; implement it in the
-  caller (example in README)
-- `ApprovalController` removed; encode approve-all/strict behavior in callbacks
-- Session caching is no longer provided by this package; implement it in the
-  caller (example in README)
 
 ## [0.8.0] - 2025-12-11
 
